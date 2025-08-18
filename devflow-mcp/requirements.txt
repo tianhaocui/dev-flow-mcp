@@ -1,0 +1,14 @@
+# Core
+mcp==1.12.4
+pydantic>=2.6.0
+python-frontmatter>=1.1.0
+pyyaml>=6.0.1
+rich>=13.7.1
+click>=8.1.7
+
+# Optional (file ops)
+pathspec>=0.12.1
+
+# External integrations
+PyMySQL>=1.1.0
+requests>=2.32.3

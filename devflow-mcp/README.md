@@ -5,8 +5,8 @@
 - 主文档：`Docs/.tasks`
 - 过程文档：`Docs/ProcessDocuments`
 - 集成：
-  - Jira MCP 位置：`/Volumes/外置/MCP/Jira-MCP-Server`
-  - MySQL MCP 位置：`/Volumes/外置/MCP/mysql_mcp_server`
+  - Jira MCP 
+  - MySQL MCP 位置
 
 本仓库当前仅提供工具骨架与接口契约，尚未实现具体逻辑。
 

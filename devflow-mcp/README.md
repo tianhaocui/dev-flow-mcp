@@ -80,3 +80,32 @@ DevFlow MCP
 ## 注意
 - 本项目会尊重工作区已有“分支生成 md 文档”的机制，不会重复创建，而是做增强（状态机、校验、骨架补全）。
 - 生成的计划会提示使用外部 Jira/MySQL MCP 执行，不直接连接。
+
+
+### 核心流程工具
+
+- task.prepare_docs（RPC：mcp_task_prepare_docs）: 准备 Docs/.tasks 与 Docs/ProcessDocuments 的任务骨架
+
+- task.request_code_generation（RPC：mcp_task_request_code_generation）: 生成面向 AI 的代码编写计划
+
+- review.set_status（RPC：mcp_review_set_status）: 切换任务文档 Front Matter 状态，记录审核日志（PENDING_REVIEW / APPROVED / CHANGES_REQUESTED / PUBLISHED）
+
+- review.validate_checklist（RPC：mcp_review_validate_checklist）: 执行一致性校验（文档存在性、状态门禁、配置完整性等）
+
+- test.generate_curl_calls（RPC：mcp_test_generate_curl_calls）: 生成可执行的 curl 测试片段与用例集（前置：状态需 ≥ APPROVED）
+
+- verify.plan_with_mysql_mcp（RPC：mcp_verify_plan_with_mysql_mcp）: 生成 MySQL 验证计划（前置/断言/清理）（前置：状态需 ≥ APPROVED）
+
+- docs.generate_integration（RPC：mcp_docs_generate_integration）: 生成对接文档框架（概览/鉴权/接口/Schema/错误码/样例）（前置：状态需 ≥ APPROVED）
+
+- jira.publish_integration_doc（RPC：mcp_jira_publish_integration_doc）: 生成 Jira 提交计划（payload 与附件清单）（前置：状态需 ≥ APPROVED，且文档已生成）
+
+### 辅助/外联工具
+
+- jira.create_issue（RPC：mcp_jira_create_issue）: 在 Jira 中创建工单（REST v3，支持自定义字段）
+
+- jira.attach_files（RPC：mcp_jira_attach_files）: 向指定工单上传附件（支持多文件批量）
+
+- jira.link_issues（RPC：mcp_jira_link_issues）: 关联两个工单（Relates/Blocks/Duplicate 等）
+
+- mysql.execute_statements（RPC：mcp_mysql_execute_statements）: 执行一组 SQL（需配置 MYSQL_HOST/USER/PASSWORD/DB 等环境变量）

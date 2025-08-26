@@ -101,10 +101,11 @@ DevFlow MCP
 - docs.generate_integration（RPC：mcp_docs_generate_integration）: 生成完整的对接文档内容（概览/鉴权/接口/Schema/错误码/样例）（前置：状态需 ≥ APPROVED）
 
 - jira.publish_integration_doc（RPC：mcp_jira_publish_integration_doc）: 直接创建 Jira 工单并上传附件（前置：状态需 ≥ APPROVED，且文档已生成）
+  - 🔄 **自动检测**: 支持从当前Git分支自动检测项目Key和相关ticket信息
 
 ### 内置功能工具
 
-- jira.create_issue（RPC：mcp_jira_create_issue）: 内置 Jira 工单创建（REST API，支持自定义字段）
+- jira.create_issue（RPC：mcp_jira_create_issue）: 内置 Jira 工单创建（REST API，支持自定义字段，支持Git分支自动检测）
 
 - jira.attach_files（RPC：mcp_jira_attach_files）: 内置文件上传到 Jira 工单（支持多文件批量）
 
@@ -177,3 +178,9 @@ DRAFT → PENDING_REVIEW → APPROVED → PUBLISHED
 - 需求变更实时同步更新
 - 可选的测试用例自动生成
 - 完整的同步记录和追溯
+
+**🌿 Git分支集成**
+- 自动从分支名提取ticket号码（如：feature/DTS-7442 → DTS-7442）
+- 自动推导项目Key（如：DTS-7442 → DTS项目）
+- 支持多种分支命名规范：feature/、bugfix/、hotfix/等
+- 无需手动指定projectKey，开发更流畅

@@ -1,0 +1,119 @@
+{
+  "test_run": {
+    "start_time": "2025-08-23T17:45:41.798421",
+    "end_time": "2025-08-23T17:45:41.902929",
+    "total_duration": 0.104508,
+    "dts_ticket": "DTS-7442",
+    "feature": "WebSocket群消息@功能"
+  },
+  "summary": {
+    "total_suites": 6,
+    "passed": 4,
+    "failed": 2,
+    "errors": 0,
+    "success_rate": "66.7%"
+  },
+  "detailed_results": [
+    {
+      "suite": "数据结构验证",
+      "status": "PASSED",
+      "details": {
+        "success": true,
+        "passed": 4,
+        "failed": 0,
+        "details": [
+          "✅ valid_user_relation: 通过",
+          "✅ missing_userId: 通过",
+          "✅ empty_array: 通过",
+          "✅ duplicate_users: 通过"
+        ],
+        "duration": 5.9604644775390625e-06,
+        "summary": "数据结构测试: 4个通过, 0个失败"
+      },
+      "duration": 5.9604644775390625e-06
+    },
+    {
+      "suite": "边界值测试",
+      "status": "PASSED",
+      "details": {
+        "success": true,
+        "passed": 5,
+        "total": 5,
+        "details": [
+          "✅ 单个用户: 通过",
+          "✅ 最大用户数: 通过",
+          "✅ 超限用户数: 通过",
+          "✅ 空用户ID: 通过",
+          "✅ 超长用户ID: 通过"
+        ],
+        "duration": 0.0001881122589111328
+      },
+      "duration": 0.0001881122589111328
+    },
+    {
+      "suite": "并发性能测试",
+      "status": "FAILED",
+      "details": {
+        "success": false,
+        "messages_sent": 50,
+        "successful": 47,
+        "failed": 3,
+        "duration": 0.10398006439208984,
+        "avg_response_time": 0.0020796012878417968,
+        "details": [
+          "并发发送50条消息: 47成功, 3失败"
+        ]
+      },
+      "duration": 0.10398006439208984
+    },
+    {
+      "suite": "错误处理测试",
+      "status": "PASSED",
+      "details": {
+        "success": true,
+        "scenarios_tested": 5,
+        "handled_correctly": 5,
+        "duration": 8.106231689453125e-06,
+        "details": [
+          "错误处理测试: 5/5 场景正确处理"
+        ]
+      },
+      "duration": 8.106231689453125e-06
+    },
+    {
+      "suite": "数据库一致性测试",
+      "status": "PASSED",
+      "details": {
+        "success": true,
+        "checks_performed": 5,
+        "passed": 5,
+        "duration": 9.5367431640625e-07,
+        "details": [
+          "数据库一致性: 5/5 检查通过"
+        ]
+      },
+      "duration": 9.5367431640625e-07
+    },
+    {
+      "suite": "用户体验测试",
+      "status": "FAILED",
+      "details": {
+        "success": false,
+        "metrics_evaluated": 5,
+        "good_metrics": 4,
+        "duration": 6.9141387939453125e-06,
+        "details": [
+          "用户体验评估: 4/5 指标达标"
+        ],
+        "metrics": {
+          "消息发送延迟": 0.15,
+          "通知推送延迟": 0.8,
+          "UI响应时间": 0.05,
+          "错误提示清晰度": 0.9,
+          "操作直观性": 0.85
+        }
+      },
+      "duration": 6.9141387939453125e-06
+    }
+  ]
+}

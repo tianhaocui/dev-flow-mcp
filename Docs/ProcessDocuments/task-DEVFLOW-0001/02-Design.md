@@ -5,13 +5,14 @@ updatedAt: 2025-08-14T00:00:00Z
 
 # 总体设计
 - 文档目录结构与 Front Matter 统一；状态受控。
-- 工具通过 MCP 对外暴露，返回待执行计划与文档路径。
-- 与 Jira/MySQL MCP 以“执行提示 + 计划载荷”对接。
+- 工具通过 MCP 对外暴露，直接执行功能并返回完整结果。
+- 内置完整的 Jira/MySQL 功能，支持直接操作和实时反馈。
 
 # 状态机门禁
-- 仅 APPROVED 后可生成 curl / MySQL 计划 / 对接文档 / Jira 计划。
+- 仅 APPROVED 后可执行 curl 生成、MySQL 验证、对接文档生成和 Jira 工单创建。
 
-# 外部 MCP 路径
-- Jira MCP：`/Volumes/外置/MCP/Jira-MCP-Server`
-- MySQL MCP：`/Volumes/外置/MCP/mysql_mcp_server`
+# 内置功能
+- MySQL 直接执行：支持前置条件、断言检查、清理操作
+- Jira 直接操作：工单创建、附件上传、关联管理
+- 文档完整生成：从模板到内容的完整文档创建
 

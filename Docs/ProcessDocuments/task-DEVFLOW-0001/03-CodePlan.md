@@ -9,10 +9,11 @@ updatedAt: 2025-08-14T00:00:00Z
 - 约束：
   - 严格路径：`Docs/.tasks` 与 `Docs/ProcessDocuments`
   - 保留 Front Matter 与用户修改
-  - 只生成“计划”和“文档”，外部执行交给对应 MCP
+  - 直接执行所有功能，生成实际内容和完整结果
 - 验收：
   - 工具接口齐全，输入输出 schema 完整
-  - 计划能指导外部 MCP 执行
+  - 所有功能直接执行并返回完整结果
+  - MySQL/Jira 操作无需外部依赖
 
 # TODO（AI 执行）
 - 填充工具实现：读写文档、Front Matter 更新、校验与状态流转。

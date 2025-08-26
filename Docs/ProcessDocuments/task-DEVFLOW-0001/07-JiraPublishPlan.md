@@ -4,7 +4,7 @@ updatedAt: 2025-08-14T00:00:00Z
 ---
 
 # 执行提示
-- 使用 Jira MCP：`/Volumes/外置/MCP/Jira-MCP-Server`
+- 内置 Jira 功能：直接创建工单并上传附件
 - 附件：`Docs/ProcessDocuments/task-DEVFLOW-0001/06-Integration.md`
 
 # payload（示意）

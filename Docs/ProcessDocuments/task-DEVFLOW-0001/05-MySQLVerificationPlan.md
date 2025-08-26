@@ -4,7 +4,7 @@ updatedAt: 2025-08-14T00:00:00Z
 ---
 
 # 执行提示
-- 使用 MySQL MCP 运行：`/Volumes/外置/MCP/mysql_mcp_server`
+- 内置 MySQL 功能：直接执行 SQL 并返回结果
 - 顺序：preconditions → assertions → cleanup
 
 # preconditions

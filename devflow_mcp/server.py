@@ -1292,7 +1292,6 @@ def call_api(endpoint, data=None):
 
 # 使用示例
 result = call_api('/api/v1/resource', {{'name': 'test'}})
-print(result)
 ```
 
 ### curl 示例
@@ -2539,7 +2538,6 @@ def _parse_wiki_url(wiki_url: str) -> Dict[str, Optional[str]]:
         return result
         
     except Exception as e:
-        print(f"Error parsing Wiki URL: {e}")
         return {"spaceKey": None, "pageTitle": None, "pageId": None}
 
 
@@ -3207,7 +3205,7 @@ def wiki_read_url(input: WikiReadUrlInput) -> WikiReadUrlOutput:
                 ))
                 result.comments = comments_result.comments
             except Exception as e:
-                print(f"Failed to get comments: {e}")
+                pass
         
         # 获取附件信息（如果需要）
         if input.includeAttachments:
@@ -3229,7 +3227,7 @@ def wiki_read_url(input: WikiReadUrlInput) -> WikiReadUrlOutput:
                         })
                     result.attachments = attachments
             except Exception as e:
-                print(f"Failed to get attachments: {e}")
+                pass
         
         return result
         
@@ -3291,7 +3289,6 @@ def wiki_add_comment(input: WikiAddCommentInput) -> WikiAddCommentOutput:
                     tinymce_success = True
                     break
             except Exception as e:
-                print(f"TinyMCE API {tinymce_url} failed: {e}")
                 continue
         
         if tinymce_success and resp and resp.status_code < 400:
@@ -3307,8 +3304,6 @@ def wiki_add_comment(input: WikiAddCommentInput) -> WikiAddCommentOutput:
                 hint=f"Comment added successfully via TinyMCE API to page {input.pageId}"
             )
         
-        # 如果TinyMCE API失败，回退到标准REST API
-        print(f"TinyMCE API failed ({resp.status_code}), falling back to standard REST API")
         
         # 构建标准API评论数据
         comment_data = {
@@ -3400,14 +3395,11 @@ def wiki_get_comments(input: WikiGetCommentsInput) -> WikiGetCommentsOutput:
                     successful_url = comment_url
                     break
                 elif resp.status_code == 501:
-                    print(f"API not implemented: {comment_url}")
                     continue
                 else:
-                    print(f"API failed with {resp.status_code}: {comment_url}")
                     continue
                     
             except Exception as e:
-                print(f"Exception with {comment_url}: {e}")
                 continue
         
         if successful_response and successful_response.status_code == 200:
@@ -3446,7 +3438,7 @@ def wiki_get_comments(input: WikiGetCommentsInput) -> WikiGetCommentsOutput:
                     hint=f"Retrieved {len(processed_comments)} comments via {successful_url} for page {input.pageId}"
                 )
             except Exception as parse_e:
-                print(f"Failed to parse response: {parse_e}")
+                pass
         
         # 如果所有评论API都失败，返回错误信息
         if not successful_response:
@@ -3716,7 +3708,7 @@ def wiki_publish_task(input: WikiPublishTaskInput) -> WikiPublishTaskOutput:
                                     "docFile": doc_file
                                 })
                         except Exception as e:
-                            print(f"Failed to publish {doc_file}: {str(e)}")
+                            pass
         
         # 4. 发布集成文档（如果启用且存在）
         if input.includeIntegrationDoc:
@@ -3743,7 +3735,7 @@ def wiki_publish_task(input: WikiPublishTaskInput) -> WikiPublishTaskOutput:
                             "type": "integration_doc"
                         })
                 except Exception as e:
-                    print(f"Failed to publish integration doc: {str(e)}")
+                    pass
         
         # 5. 更新主页面，添加子页面链接（如果启用自动链接）
         if input.autoLink and len(published_pages) > 1:
@@ -3758,7 +3750,7 @@ def wiki_publish_task(input: WikiPublishTaskInput) -> WikiPublishTaskOutput:
                     versionComment="Added child page links"
                 ))
             except Exception as e:
-                print(f"Failed to update main page with links: {str(e)}")
+                pass
         
         return WikiPublishTaskOutput(
             taskKey=input.taskKey,
@@ -4714,7 +4706,7 @@ def wiki_diagnostic(input: WikiDiagnosticInput) -> WikiDiagnosticOutput:
                 if resp.status_code < 400:
                     working_comment_apis.append(comment_url)
                 elif resp.status_code == 501:
-                    api_tests[f"comment_api_{len(api_tests)-1}"]["note"] += " (501 Not Implemented)"
+                    api_tests[f"comment_api_{len(api_tests)-1}"]["note"] = "501 Not Implemented"
                     
             except Exception as e:
                 api_tests[f"comment_api_{len(api_tests)}"] = {

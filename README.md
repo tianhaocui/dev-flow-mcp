@@ -41,8 +41,15 @@ python -m devflow_mcp.server
       "JIRA_CONTEXT_PATH": "/jira",      
       "JIRA_API_VERSION": "2",           
       "JIRA_USER": "you@example.com",
-      "JIRA_USER_PASSWORD": "yourPassword"
+      "JIRA_USER_PASSWORD": "yourPassword",
       // 也可使用 JIRA_BEARER_TOKEN 或 JIRA_API_TOKEN（兼容旧配置）
+      
+      // Wiki (Confluence) 配置
+      "WIKI_BASE_URL": "https://wiki.logisticsteam.com",
+      "WIKI_CONTEXT_PATH": "",           
+      "WIKI_API_VERSION": "1.0",        // 基于您的API结构使用1.0版本
+      "WIKI_USER": "you@example.com",
+      "WIKI_USER_PASSWORD": "yourWikiPassword"
     }
   }
 }
@@ -111,7 +118,39 @@ DevFlow MCP
 
 - jira.link_issues（RPC：mcp_jira_link_issues）: 内置 Jira 工单关联（Relates/Blocks/Duplicate 等）
 
+- jira.add_comment（RPC：mcp_jira_add_comment）: 向 Jira 工单添加评论，支持富文本、用户提及和可见性控制
+
+- jira.update_status（RPC：mcp_jira_update_status）: 更新 Jira 工单状态，支持状态转换验证和评论添加
+
+- jira.batch_update_status（RPC：mcp_jira_batch_update_status）: 批量更新多个 Jira 工单状态
+
+- jira.mark_progress（RPC：mcp_jira_mark_progress）: 智能标记任务进展到 Jira，自动生成包含任务状态、Git改动、文档状态和下一步计划的结构化评论
+
 - mysql.execute_statements（RPC：mcp_mysql_execute_statements）: 内置 MySQL 执行器（需配置 MYSQL_HOST/USER/PASSWORD/DB 等环境变量）
+
+### Wiki (Confluence) 集成工具
+
+- wiki.create_page（RPC：mcp_wiki_create_page）: 在 Wiki 中创建新页面，支持父页面、标签和多种内容格式
+
+- wiki.update_page（RPC：mcp_wiki_update_page）: 更新 Wiki 页面内容，支持版本控制和评论
+
+- wiki.search_pages（RPC：mcp_wiki_search_pages）: 搜索 Wiki 页面，支持全文搜索、标题搜索和空间限制
+
+- wiki.get_page（RPC：mcp_wiki_get_page）: 获取 Wiki 页面详情，支持通过ID或标题查找
+
+- wiki.read_url（RPC：mcp_wiki_read_url）: 根据 Wiki URL 直接读取页面内容，支持多种URL格式，可选包含评论和附件
+
+- wiki.publish_task（RPC：mcp_wiki_publish_task）: 将 DevFlow 任务文档自动发布到 Wiki，创建结构化的文档页面
+
+- wiki.add_comment（RPC：mcp_wiki_add_comment）: 向 Wiki 页面添加评论，支持回复评论
+
+- wiki.get_comments（RPC：mcp_wiki_get_comments）: 获取 Wiki 页面的评论列表，支持过滤回复
+
+- wiki.update_comment（RPC：mcp_wiki_update_comment）: 更新 Wiki 评论内容，自动版本控制
+
+- wiki.delete_comment（RPC：mcp_wiki_delete_comment）: 删除 Wiki 评论
+
+- wiki.diagnostic（RPC：mcp_wiki_diagnostic）: 诊断 Wiki API 连接和权限问题，自动测试多种API路径，解决501等错误
 
 ### Jira集成与测试分析工具
 
@@ -184,3 +223,80 @@ DRAFT → PENDING_REVIEW → APPROVED → PUBLISHED
 - 自动推导项目Key（如：DTS-7442 → DTS项目）
 - 支持多种分支命名规范：feature/、bugfix/、hotfix/等
 - 无需手动指定projectKey，开发更流畅
+
+### Wiki (Confluence) 集成特性
+
+**📖 页面管理**
+- 完整的页面CRUD操作（创建、读取、更新、删除）
+- 支持父子页面层级结构
+- 自动版本控制和变更历史
+- 灵活的标签管理系统
+
+**💬 评论系统**
+- 添加页面评论，支持HTML格式内容
+- 回复评论功能，支持多层级讨论
+- 获取评论列表，可选择包含或排除回复
+- 更新和删除评论，自动版本控制
+- 评论作者信息和时间戳追踪
+- 智能API路径检测，自动绕过501错误
+- 支持TinyMCE和标准REST API双重备份
+
+**🔗 URL直读功能**
+- 支持多种Wiki URL格式自动解析
+- 直接通过页面链接获取完整内容
+- 可选包含评论和附件信息
+- 自动提取面包屑导航和作者信息
+- 支持的URL格式：
+  - `/display/SPACE/Page+Title`
+  - `/pages/viewpage.action?spaceKey=SPACE&title=Page+Title`
+  - `/spaces/SPACE/pages/123456/Page+Title`
+
+**🔍 搜索功能**
+- 全文内容搜索
+- 标题精确匹配
+- 空间范围限制
+- CQL查询语言支持
+
+**🛠️ 诊断和故障排除**
+- 自动测试多种API路径和版本
+- 智能检测API兼容性问题
+- 提供具体的配置修复建议
+- 识别权限和服务器配置问题
+- 专门解决501 Not Implemented错误
+
+**📝 内容格式**
+- Markdown到Confluence存储格式自动转换
+- 支持代码块、表格、链接等富文本元素
+- Confluence宏（macro）自动生成
+- 多种模板样式（标准、紧凑、详细）
+
+**🔗 DevFlow集成**
+```
+任务发布流程:
+DevFlow任务 → Wiki主页面 + 子页面
+├── 任务概览页（状态、负责人、时间线）
+├── 过程文档页（背景、设计、代码计划等）
+├── 集成文档页（API文档、测试用例）
+└── 自动链接和导航
+```
+
+**⚙️ 配置说明**
+```bash
+WIKI_BASE_URL=https://wiki.logisticsteam.com  # Wiki服务器地址
+WIKI_CONTEXT_PATH=""                       # 上下文路径（通常为空）
+WIKI_API_VERSION=1.0                       # API版本（基于您的API结构使用1.0）
+WIKI_USER=you@example.com                 # Wiki用户名
+WIKI_USER_PASSWORD=yourPassword            # Wiki密码
+```
+
+**🚀 使用场景**
+- 将DevFlow任务文档发布到企业Wiki
+- 创建结构化的项目文档空间
+- 自动维护文档版本和链接关系
+- 团队知识库的统一管理
+- 页面评论和讨论管理
+- 代码审查意见的Wiki记录
+- 项目进展的评论跟踪
+- 通过URL快速获取和分析Wiki页面内容
+- 批量处理Wiki页面信息
+- 与外部系统集成时的内容同步

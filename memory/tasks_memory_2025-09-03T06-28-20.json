@@ -1,0 +1,103 @@
+{
+  "tasks": [
+    {
+      "id": "e202e3d2-7450-4b2a-b3fc-52e8ec89cd40",
+      "name": "数据库结构扩展",
+      "description": "扩展CustomerServerSession实体和数据库表结构，添加群组关联字段，扩展GroupTypeEnum支持客服群组类型",
+      "notes": "注意保持现有字段不变，只新增字段。枚举扩展需要符合现有代码风格",
+      "status": "completed",
+      "dependencies": [],
+      "createdAt": "2025-09-01T05:34:03.002Z",
+      "updatedAt": "2025-09-01T05:35:32.166Z",
+      "relatedFiles": [
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/entity/CustomerServerSession.java",
+          "type": "TO_MODIFY",
+          "description": "添加群组关联字段"
+        },
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/enums/GroupTypeEnum.java",
+          "type": "TO_MODIFY",
+          "description": "添加客服群组类型"
+        },
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/vo/CustomerServerSessionVO.java",
+          "type": "TO_MODIFY",
+          "description": "保持VO兼容性"
+        }
+      ],
+      "implementationGuide": "1. 在CustomerServerSession实体添加groupId、agentCompanyId、userCompanyId字段\\n2. 在GroupTypeEnum枚举中添加CUSTOMER_SERVICE(3, \"CUSTOMER_SERVICE\", \"客服群组\")\\n3. 编写数据库迁移脚本添加相应字段\\n4. 更新CustomerServerSessionVO保持API返回格式兼容",
+      "verificationCriteria": "1. 数据库字段添加成功且不影响现有数据\\n2. 枚举类型可正常使用且向后兼容\\n3. 现有API返回格式不变",
+      "analysisResult": "将客服对话系统从私聊模式改造为群聊底层实现，保持API完全兼容。通过重构服务调用、添加群组生命周期管理、实现消息格式适配等方式，实现客户端零改动的平滑迁移，同时支持多客服协作功能。",
+      "summary": "数据库结构扩展任务已完成。成功在CustomerServerSession实体中添加了groupId、agentCompanyId、userCompanyId三个新字段用于群组关联；在GroupTypeEnum枚举中添加了CUSTOMER_SERVICE(3, \"CUSTOMER_SERVICE\", \"客服群组\")类型；创建了数据库迁移脚本20250102_alter_im_customer_server_session_add_group_fields.sql包含字段添加和索引创建；保持CustomerServerSessionVO不变以确保API返回格式完全兼容。所有代码无语法错误，符合现有代码风格和命名规范。",
+      "completedAt": "2025-09-01T05:35:32.166Z"
+    },
+    {
+      "id": "7162df5b-b8eb-42ac-9412-b40fcb2d05cb",
+      "name": "客服群组管理器实现",
+      "description": "创建CustomerServerGroupManager组件，负责客服群组的创建、解散和成员管理，复用现有GroupService和GroupMemberService",
+      "notes": "充分利用现有群组基础设施，避免重复实现。群组命名格式：客服会话-{sessionId}",
+      "status": "completed",
+      "dependencies": [
+        {
+          "taskId": "e202e3d2-7450-4b2a-b3fc-52e8ec89cd40"
+        }
+      ],
+      "createdAt": "2025-09-01T05:34:03.002Z",
+      "updatedAt": "2025-09-01T05:38:46.977Z",
+      "relatedFiles": [
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/manager/CustomerServerGroupManager.java",
+          "type": "CREATE",
+          "description": "客服群组管理器"
+        },
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/service/GroupService.java",
+          "type": "REFERENCE",
+          "description": "复用群组服务"
+        },
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/service/GroupMemberService.java",
+          "type": "REFERENCE",
+          "description": "复用群成员服务"
+        }
+      ],
+      "implementationGuide": "1. 创建CustomerServerGroupManager组件\\n2. 实现createCustomerGroup()方法调用GroupService.save()创建群组\\n3. 实现dissolveCustomerGroup()方法调用软删除群组和清理成员\\n4. 实现addAgentToGroup()支持多客服协作\\n5. 复用GroupMemberService.saveOrUpdateBatch()和removeByGroupId()方法",
+      "verificationCriteria": "1. 群组创建和解散功能正常\\n2. 成员管理操作成功\\n3. 与现有群组系统无冲突",
+      "analysisResult": "将客服对话系统从私聊模式改造为群聊底层实现，保持API完全兼容。通过重构服务调用、添加群组生命周期管理、实现消息格式适配等方式，实现客户端零改动的平滑迁移，同时支持多客服协作功能。",
+      "summary": "客服群组管理器实现任务已完成。成功创建CustomerServerGroupManager组件，实现了createCustomerGroup()复用GroupService.save()创建客服群组、dissolveCustomerGroup()使用软删除机制解散群组、addAgentToGroup()支持多客服协作等核心功能；充分复用了现有的GroupMemberService.saveOrUpdateBatch()和removeByGroupId()方法，避免重复实现；采用了统一的群组命名格式\"客服会话-{sessionId}\"，并通过GroupTypeEnum.CUSTOMER_SERVICE标识客服群组类型；所有方法都添加了@Transactional注解确保数据一致性，与现有群组系统完全兼容。",
+      "completedAt": "2025-09-01T05:38:46.977Z"
+    },
+    {
+      "id": "ca013eca-e122-4d8d-9582-20ce7eba9678",
+      "name": "客服会话服务改造",
+      "description": "改造CustomerServerSessionService的createSession和closeSession方法，实现session与群组的生命周期绑定",
+      "notes": "使用@Transactional确保session-群组操作的一致性。agentId可能在创建时为空，bondSession时设置",
+      "status": "completed",
+      "dependencies": [
+        {
+          "taskId": "7162df5b-b8eb-42ac-9412-b40fcb2d05cb"
+        }
+      ],
+      "createdAt": "2025-09-01T05:34:03.002Z",
+      "updatedAt": "2025-09-01T05:42:27.934Z",
+      "relatedFiles": [
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/service/impl/CustomerServerSessionServiceImpl.java",
+          "type": "TO_MODIFY",
+          "description": "添加群组生命周期管理"
+        },
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/dto/CustomerServerSessionCreateDTO.java",
+          "type": "REFERENCE",
+          "description": "查看创建时是否包含agentId"
+        }
+      ],
+      "implementationGuide": "1. 在createSession()中调用CustomerServerGroupManager.createCustomerGroup()\\n2. 在closeSession()中调用CustomerServerGroupManager.dissolveCustomerGroup()\\n3. 在bondSession()中支持多客服加入群组\\n4. 保持现有事务边界和缓存策略\\n5. 保持方法签名和返回值不变",
+      "verificationCriteria": "1. 创建session时成功创建对应群组\\n2. 关闭session时成功解散群组\\n3. 现有API行为保持不变",
+      "analysisResult": "将客服对话系统从私聊模式改造为群聊底层实现，保持API完全兼容。通过重构服务调用、添加群组生命周期管理、实现消息格式适配等方式，实现客户端零改动的平滑迁移，同时支持多客服协作功能。",
+      "summary": "客服会话服务改造任务已成功完成。实现了完整的session-群组生命周期绑定：1) 在saveSession()中成功集成CustomerServerGroupManager.createCustomerGroup()，创建session时自动建立对应的客服群组并更新groupId关联；2) 在closeSession()中调用dissolveCustomerGroup()实现会话关闭时自动解散群组，保持数据一致性；3) 在bondSession()中通过addAgentToGroup()支持多客服动态加入群组，并处理历史数据的群组重建机制；4) 所有群组操作都采用异常隔离机制，确保主业务流程不受影响；5) 保持了现有的@Transactional事务边界和@CachePut缓存策略不变；6) API方法签名和返回值完全兼容，实现了透明的底层改造。",
+      "completedAt": "2025-09-01T05:42:27.933Z"
+    }
+  ]
+}

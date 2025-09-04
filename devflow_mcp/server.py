@@ -322,6 +322,30 @@ class RequirementSyncOutput(BaseModel):
 
 # ---------- Git Utils ----------
 
+def _get_recent_git_commits(limit: int = 5) -> List[Dict[str, str]]:
+    """获取最近的Git提交记录"""
+    try:
+        result = subprocess.run(
+            ["git", "log", f"--max-count={limit}", "--pretty=format:%h|%s|%an|%ar"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        commits = []
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                parts = line.split('|')
+                if len(parts) >= 4:
+                    commits.append({
+                        "hash": parts[0],
+                        "message": parts[1],
+                        "author": parts[2],
+                        "time": parts[3]
+                    })
+        return commits
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
 def _get_current_git_branch() -> str:
     """获取当前Git分支名称"""
     try:
@@ -621,6 +645,120 @@ def _calculate_coverage(requirements: List[RequirementItem], test_cases: List[st
         ))
     
     return matches
+
+def _generate_task_progress_report(project_root: Path, task_key: str, include_status: bool = True, include_changes: bool = True, include_next_steps: bool = True) -> Dict[str, Any]:
+    """生成任务进展报告"""
+    report = {
+        "taskKey": task_key,
+        "timestamp": _timestamp(),
+        "status": None,
+        "recentChanges": [],
+        "nextSteps": [],
+        "processDocuments": []
+    }
+    
+    # 1. 获取任务状态信息
+    if include_status:
+        try:
+            task_metadata = _get_task_metadata(project_root, task_key)
+            current_status = _read_task_status(project_root, task_key)
+            
+            report["status"] = {
+                "current": current_status,
+                "title": task_metadata.get("title", ""),
+                "owner": task_metadata.get("owner", ""),
+                "reviewers": task_metadata.get("reviewers", []),
+                "updatedAt": task_metadata.get("updatedAt", ""),
+                "reviews": task_metadata.get("reviews", [])[-3:]  # 最近3次审核记录
+            }
+        except Exception:
+            report["status"] = {"current": "UNKNOWN", "error": "无法读取任务状态"}
+    
+    # 2. 获取最近的Git改动
+    if include_changes:
+        report["recentChanges"] = _get_recent_git_commits(5)
+    
+    # 3. 扫描过程文档状态
+    try:
+        process_dir = project_root / "Docs" / "ProcessDocuments" / f"task-{task_key}"
+        if process_dir.exists():
+            docs_info = []
+            doc_names = [
+                ("01-Context.md", "背景与目标"),
+                ("02-Design.md", "设计方案"),
+                ("03-CodePlan.md", "代码计划"),
+                ("04-TestCurls.md", "测试用例"),
+                ("05-MySQLVerificationPlan.md", "MySQL验证"),
+                ("06-Integration.md", "集成文档"),
+                ("07-JiraPublishPlan.md", "Jira发布")
+            ]
+            
+            for doc_file, doc_title in doc_names:
+                doc_path = process_dir / f"{task_key}_{doc_file}"
+                if doc_path.exists():
+                    try:
+                        # 读取文档状态
+                        post = frontmatter.load(doc_path)
+                        doc_status = post.metadata.get("status", "UNKNOWN")
+                        updated_at = post.metadata.get("updatedAt", "")
+                        
+                        docs_info.append({
+                            "name": doc_title,
+                            "file": doc_file,
+                            "status": doc_status,
+                            "updatedAt": updated_at,
+                            "exists": True
+                        })
+                    except Exception:
+                        docs_info.append({
+                            "name": doc_title,
+                            "file": doc_file,
+                            "status": "ERROR",
+                            "exists": True
+                        })
+                else:
+                    docs_info.append({
+                        "name": doc_title,
+                        "file": doc_file,
+                        "status": "MISSING",
+                        "exists": False
+                    })
+            
+            report["processDocuments"] = docs_info
+    except Exception:
+        report["processDocuments"] = []
+    
+    # 4. 生成下一步建议
+    if include_next_steps:
+        next_steps = []
+        current_status = report.get("status", {}).get("current", "UNKNOWN")
+        
+        if current_status == "DRAFT":
+            next_steps.append("完善任务文档内容，准备提交审核")
+            next_steps.append("确保所有必要的过程文档已创建")
+        elif current_status == "PENDING_REVIEW":
+            next_steps.append("等待审核人员审核")
+            next_steps.append("准备根据审核意见进行修改")
+        elif current_status == "APPROVED":
+            next_steps.append("开始执行开发任务")
+            next_steps.append("生成测试用例和验证计划")
+        elif current_status == "CHANGES_REQUESTED":
+            next_steps.append("根据审核意见修改文档")
+            next_steps.append("重新提交审核")
+        elif current_status == "PUBLISHED":
+            next_steps.append("任务已完成，进行后续维护")
+            next_steps.append("收集使用反馈")
+        
+        # 基于文档状态添加建议
+        for doc in report.get("processDocuments", []):
+            if not doc["exists"]:
+                next_steps.append(f"创建缺失的文档：{doc['name']}")
+            elif doc["status"] == "DRAFT":
+                next_steps.append(f"完善文档内容：{doc['name']}")
+        
+        report["nextSteps"] = next_steps[:5]  # 限制建议数量
+    
+    return report
 
 def _generate_test_recommendations(requirements: List[RequirementItem], test_matches: List[TestCaseMatch]) -> List[str]:
     """生成测试用例推荐"""
@@ -1785,6 +1923,80 @@ class JiraLinkIssuesOutput(BaseModel):
     hint: str
 
 
+class JiraAddCommentInput(BaseModel):
+    """Jira 添加评论的输入参数"""
+    model_config = ConfigDict(title="JiraAddCommentInput", description="Jira 添加评论的输入参数")
+    issueKey: str = Field(..., description="目标工单 Key")
+    comment: str = Field(..., description="评论内容，支持 Jira 标记语法")
+    visibility: Optional[str] = Field(None, description="评论可见性：public/internal 或指定用户组")
+    mentionUsers: List[str] = Field(default_factory=list, description="要@提及的用户列表（用户名或邮箱）")
+
+
+class JiraAddCommentOutput(BaseModel):
+    commentId: Optional[str] = None
+    url: Optional[str] = None
+    hint: str
+
+
+class JiraUpdateStatusInput(BaseModel):
+    """Jira 更新状态的输入参数"""
+    model_config = ConfigDict(title="JiraUpdateStatusInput", description="Jira 更新状态的输入参数")
+    issueKey: str = Field(..., description="目标工单 Key")
+    newStatus: str = Field(..., description="新状态名称")
+    transitionComment: Optional[str] = Field(None, description="状态转换时添加的评论")
+    validateTransition: bool = Field(True, description="是否验证状态转换的合法性")
+    fields: Dict[str, Any] = Field(default_factory=dict, description="状态转换时需要更新的字段")
+
+
+class JiraUpdateStatusOutput(BaseModel):
+    success: bool
+    oldStatus: Optional[str] = None
+    newStatus: Optional[str] = None
+    transitionId: Optional[str] = None
+    hint: str
+
+
+class JiraBatchUpdateInput(BaseModel):
+    """Jira 批量状态更新的输入参数"""
+    model_config = ConfigDict(title="JiraBatchUpdateInput", description="Jira 批量状态更新的输入参数")
+    updates: List[Dict[str, Any]] = Field(..., description="批量更新操作列表，每项包含 issueKey, newStatus 等")
+    continueOnError: bool = Field(True, description="遇到错误时是否继续执行后续操作")
+    addComment: bool = Field(True, description="是否为每个状态转换添加评论")
+
+
+class JiraBatchUpdateOutput(BaseModel):
+    successful: List[Dict[str, Any]]
+    failed: List[Dict[str, Any]]
+    summary: Dict[str, int]
+
+
+class JiraMarkProgressInput(BaseModel):
+    """Jira 进展标记的输入参数"""
+    model_config = ConfigDict(title="JiraMarkProgressInput", description="Jira 进展标记的输入参数")
+    taskKey: str = Field(..., description="DevFlow 任务唯一标识")
+    jiraIssueKey: Optional[str] = Field(None, description="关联的 Jira 工单 Key，为空时自动从Git分支检测")
+    markType: str = Field("progress", description="标记类型：progress/milestone/completion/issue/solution")
+    title: str = Field(..., description="进展标记的标题")
+    description: Optional[str] = Field(None, description="详细描述（可选）")
+    includeTaskStatus: bool = Field(True, description="是否包含当前任务状态信息")
+    includeChanges: bool = Field(True, description="是否包含最近的改动信息")
+    includeNextSteps: bool = Field(True, description="是否包含下一步计划")
+    mentionUsers: List[str] = Field(default_factory=list, description="要@提及的用户列表")
+    visibility: Optional[str] = Field("public", description="评论可见性：public/internal")
+    autoDetectFromBranch: bool = Field(True, description="是否自动从Git分支检测Jira信息")
+
+
+class JiraMarkProgressOutput(BaseModel):
+    taskKey: str
+    jiraIssueKey: Optional[str] = None
+    commentId: Optional[str] = None
+    commentUrl: Optional[str] = None
+    markContent: str
+    timestamp: str
+    success: bool
+    hint: str
+
+
 @app.tool()
 def jira_link_issues(input: JiraLinkIssuesInput) -> JiraLinkIssuesOutput:
     """关联两个工单（linkType: Relates/Blocks/Duplicate 等）。"""
@@ -1798,6 +2010,1948 @@ def jira_link_issues(input: JiraLinkIssuesInput) -> JiraLinkIssuesOutput:
         return JiraLinkIssuesOutput(ok=True, hint="Linked via Jira REST API")
     except Exception as exc:  # pragma: no cover
         return JiraLinkIssuesOutput(ok=False, hint=f"Jira link error: {exc}")
+
+
+@app.tool()
+def jira_add_comment(input: JiraAddCommentInput) -> JiraAddCommentOutput:
+    """向 Jira 工单添加评论，支持富文本、用户提及和可见性控制。"""
+    try:
+        session = _get_jira_session()
+        url = _jira_api_url(f"issue/{input.issueKey}/comment")
+        
+        # 构建评论内容，处理用户提及
+        comment_text = input.comment
+        if input.mentionUsers:
+            mention_text = " ".join([f"[~{user}]" for user in input.mentionUsers])
+            comment_text = f"{mention_text}\n\n{comment_text}"
+        
+        # 构建请求 payload
+        payload = {
+            "body": comment_text
+        }
+        
+        # 处理可见性设置
+        if input.visibility and input.visibility != "public":
+            if input.visibility == "internal":
+                # 内部可见性，通常限制给开发团队
+                payload["visibility"] = {
+                    "type": "role",
+                    "value": "Developers"
+                }
+            else:
+                # 指定用户组可见
+                payload["visibility"] = {
+                    "type": "group", 
+                    "value": input.visibility
+                }
+        
+        resp = session.post(url, json=payload, timeout=30)
+        if resp.status_code >= 400:
+            return JiraAddCommentOutput(
+                commentId=None, 
+                url=None, 
+                hint=f"Failed to add comment: {resp.status_code} {resp.text}"
+            )
+        
+        comment_data = resp.json()
+        comment_id = comment_data.get("id")
+        
+        # 构建评论链接
+        base_url = os.getenv("JIRA_BASE_URL", "").rstrip("/")
+        comment_url = f"{base_url}/browse/{input.issueKey}?focusedCommentId={comment_id}" if comment_id else None
+        
+        return JiraAddCommentOutput(
+            commentId=comment_id,
+            url=comment_url,
+            hint=f"Comment added successfully to {input.issueKey}"
+        )
+        
+    except Exception as exc:  # pragma: no cover
+        return JiraAddCommentOutput(
+            commentId=None, 
+            url=None, 
+            hint=f"Error adding comment: {exc}"
+        )
+
+
+@app.tool()
+def jira_update_status(input: JiraUpdateStatusInput) -> JiraUpdateStatusOutput:
+    """更新 Jira 工单状态，支持状态转换验证和评论添加。"""
+    try:
+        session = _get_jira_session()
+        
+        # 1. 获取当前工单状态
+        issue_url = _jira_api_url(f"issue/{input.issueKey}")
+        issue_resp = session.get(issue_url)
+        if issue_resp.status_code >= 400:
+            return JiraUpdateStatusOutput(
+                success=False,
+                hint=f"Failed to fetch issue {input.issueKey}: {issue_resp.status_code}"
+            )
+        
+        issue_data = issue_resp.json()
+        current_status = issue_data.get("fields", {}).get("status", {}).get("name", "")
+        
+        # 2. 获取可用的状态转换
+        transitions_url = _jira_api_url(f"issue/{input.issueKey}/transitions")
+        trans_resp = session.get(transitions_url)
+        if trans_resp.status_code >= 400:
+            return JiraUpdateStatusOutput(
+                success=False,
+                oldStatus=current_status,
+                hint=f"Failed to get transitions: {trans_resp.status_code}"
+            )
+        
+        transitions_data = trans_resp.json()
+        transitions = transitions_data.get("transitions", [])
+        
+        # 3. 查找目标状态的转换ID
+        target_transition = None
+        for transition in transitions:
+            if transition.get("to", {}).get("name", "").lower() == input.newStatus.lower():
+                target_transition = transition
+                break
+        
+        if not target_transition:
+            available_statuses = [t.get("to", {}).get("name", "") for t in transitions]
+            return JiraUpdateStatusOutput(
+                success=False,
+                oldStatus=current_status,
+                hint=f"Status '{input.newStatus}' not available. Available: {available_statuses}"
+            )
+        
+        # 4. 执行状态转换
+        transition_id = target_transition.get("id")
+        transition_payload = {
+            "transition": {"id": transition_id}
+        }
+        
+        # 添加转换评论
+        if input.transitionComment:
+            transition_payload["update"] = {
+                "comment": [{"add": {"body": input.transitionComment}}]
+            }
+        
+        # 添加需要更新的字段
+        if input.fields:
+            if "fields" not in transition_payload:
+                transition_payload["fields"] = {}
+            transition_payload["fields"].update(input.fields)
+        
+        # 执行转换
+        transition_resp = session.post(transitions_url, json=transition_payload, timeout=30)
+        if transition_resp.status_code >= 400:
+            return JiraUpdateStatusOutput(
+                success=False,
+                oldStatus=current_status,
+                transitionId=transition_id,
+                hint=f"Status transition failed: {transition_resp.status_code} {transition_resp.text}"
+            )
+        
+        return JiraUpdateStatusOutput(
+            success=True,
+            oldStatus=current_status,
+            newStatus=input.newStatus,
+            transitionId=transition_id,
+            hint=f"Status updated from '{current_status}' to '{input.newStatus}'"
+        )
+        
+    except Exception as exc:  # pragma: no cover
+        return JiraUpdateStatusOutput(
+            success=False,
+            hint=f"Error updating status: {exc}"
+        )
+
+
+@app.tool()
+def jira_batch_update_status(input: JiraBatchUpdateInput) -> JiraBatchUpdateOutput:
+    """批量更新多个 Jira 工单的状态。"""
+    successful = []
+    failed = []
+    
+    for i, update_item in enumerate(input.updates):
+        try:
+            # 验证必要参数
+            issue_key = update_item.get("issueKey")
+            new_status = update_item.get("newStatus")
+            
+            if not issue_key or not new_status:
+                failed.append({
+                    "index": i,
+                    "issueKey": issue_key or "unknown",
+                    "error": "Missing issueKey or newStatus"
+                })
+                continue
+            
+            # 构建状态更新请求
+            status_input = JiraUpdateStatusInput(
+                issueKey=issue_key,
+                newStatus=new_status,
+                transitionComment=update_item.get("comment", f"Batch status update to {new_status}" if input.addComment else None),
+                validateTransition=update_item.get("validateTransition", True),
+                fields=update_item.get("fields", {})
+            )
+            
+            # 执行状态更新
+            result = jira_update_status(status_input)
+            
+            if result.success:
+                successful.append({
+                    "index": i,
+                    "issueKey": issue_key,
+                    "oldStatus": result.oldStatus,
+                    "newStatus": result.newStatus,
+                    "transitionId": result.transitionId
+                })
+            else:
+                failed.append({
+                    "index": i,
+                    "issueKey": issue_key,
+                    "error": result.hint
+                })
+                
+        except Exception as e:
+            failed.append({
+                "index": i,
+                "issueKey": update_item.get("issueKey", "unknown"),
+                "error": str(e)
+            })
+            
+            if not input.continueOnError:
+                break
+    
+    summary = {
+        "total": len(input.updates),
+        "successful": len(successful),
+        "failed": len(failed)
+    }
+    
+    return JiraBatchUpdateOutput(
+        successful=successful,
+        failed=failed,
+        summary=summary
+    )
+
+
+@app.tool()
+def jira_mark_progress(input: JiraMarkProgressInput) -> JiraMarkProgressOutput:
+    """标记任务进展到 Jira，自动生成包含任务状态、改动和下一步计划的评论。
+    
+    这个功能专门为 AI 设计，用于自动化地将开发进展、状态变更、功能实现等信息
+    以结构化的方式记录到 Jira 工单中，提供完整的项目追踪和沟通记录。
+    """
+    project_root = _resolve_project_root(None)
+    timestamp = _timestamp()
+    
+    try:
+        # 1. 自动检测 Jira 工单（如果未指定）
+        jira_issue_key = input.jiraIssueKey
+        if input.autoDetectFromBranch and not jira_issue_key:
+            git_context = _auto_detect_jira_context()
+            jira_issue_key = git_context.get("ticket_key")
+            
+            if not jira_issue_key:
+                return JiraMarkProgressOutput(
+                    taskKey=input.taskKey,
+                    jiraIssueKey=None,
+                    commentId=None,
+                    commentUrl=None,
+                    markContent="",
+                    timestamp=timestamp,
+                    success=False,
+                    hint=f"无法自动检测 Jira 工单，当前分支：{git_context.get('branch_name', 'unknown')}"
+                )
+        
+        if not jira_issue_key:
+            return JiraMarkProgressOutput(
+                taskKey=input.taskKey,
+                jiraIssueKey=None,
+                commentId=None,
+                commentUrl=None,
+                markContent="",
+                timestamp=timestamp,
+                success=False,
+                hint="必须指定 jiraIssueKey 或启用 autoDetectFromBranch"
+            )
+        
+        # 2. 生成任务进展报告
+        progress_report = _generate_task_progress_report(
+            project_root, 
+            input.taskKey, 
+            input.includeTaskStatus, 
+            input.includeChanges, 
+            input.includeNextSteps
+        )
+        
+        # 3. 根据markType构建评论内容
+        mark_icons = {
+            "progress": "🔄",
+            "milestone": "🎯", 
+            "completion": "✅",
+            "issue": "⚠️",
+            "solution": "💡"
+        }
+        
+        icon = mark_icons.get(input.markType, "📝")
+        
+        # 构建评论内容（使用普通文本格式）
+        comment_lines = [
+            f"{icon} {input.title}",
+            f"标记时间: {timestamp}",
+            f"标记类型: {input.markType}",
+            ""
+        ]
+        
+        # 添加描述
+        if input.description:
+            comment_lines.extend([
+                "详细说明:",
+                input.description,
+                ""
+            ])
+        
+        # 添加任务状态信息
+        if input.includeTaskStatus and progress_report.get("status"):
+            status_info = progress_report["status"]
+            comment_lines.extend([
+                "📊 任务状态:",
+                f"当前状态: {status_info.get('current', 'UNKNOWN')}",
+                f"任务标题: {status_info.get('title', 'N/A')}",
+                f"负责人: {status_info.get('owner', 'N/A')}",
+                f"最后更新: {status_info.get('updatedAt', 'N/A')}",
+                ""
+            ])
+            
+            # 添加最近的审核记录
+            reviews = status_info.get("reviews", [])
+            if reviews:
+                comment_lines.append("最近审核记录:")
+                for review in reviews[-2:]:  # 最近2次
+                    # 安全处理时间字段，可能是datetime对象或字符串
+                    review_time = review.get('time', '')
+                    if hasattr(review_time, 'strftime'):
+                        # 如果是datetime对象，转换为字符串
+                        time_str = review_time.strftime('%Y-%m-%d')
+                    elif isinstance(review_time, str):
+                        # 如果是字符串，取前10个字符
+                        time_str = review_time[:10]
+                    else:
+                        time_str = str(review_time)[:10] if review_time else 'N/A'
+                    
+                    comment_lines.append(f"  {review.get('from', '')} -> {review.get('to', '')} by {review.get('by', '')} ({time_str})")
+                comment_lines.append("")
+        
+        # 添加过程文档状态
+        if input.includeTaskStatus and progress_report.get("processDocuments"):
+            comment_lines.extend([
+                "📋 文档状态:",
+                ""
+            ])
+            
+            for doc in progress_report["processDocuments"]:
+                status_emoji = {
+                    "DRAFT": "📝",
+                    "APPROVED": "✅", 
+                    "COMPLETED": "✅",
+                    "MISSING": "❌",
+                    "ERROR": "⚠️"
+                }.get(doc["status"], "❓")
+                
+                # 安全处理更新时间字段
+                updated_at = doc.get("updatedAt", "")
+                if hasattr(updated_at, 'strftime'):
+                    # 如果是datetime对象，转换为字符串
+                    updated_time = updated_at.strftime('%Y-%m-%d')
+                elif isinstance(updated_at, str):
+                    # 如果是字符串，取前10个字符
+                    updated_time = updated_at[:10] if updated_at else "N/A"
+                else:
+                    updated_time = str(updated_at)[:10] if updated_at else "N/A"
+                comment_lines.append(f"  {doc['name']}: {status_emoji} {doc['status']} ({updated_time})")
+            
+            comment_lines.append("")
+        
+        # 添加最近改动
+        if input.includeChanges and progress_report.get("recentChanges"):
+            comment_lines.extend([
+                "🔧 最近改动:",
+            ])
+            
+            for commit in progress_report["recentChanges"][:3]:  # 最近3个提交
+                comment_lines.append(f"  {commit['hash']} {commit['message']} - {commit['author']} ({commit['time']})")
+            
+            comment_lines.append("")
+        
+        # 添加下一步计划
+        if input.includeNextSteps and progress_report.get("nextSteps"):
+            comment_lines.extend([
+                "🎯 下一步计划:",
+            ])
+            
+            for i, step in enumerate(progress_report["nextSteps"], 1):
+                comment_lines.append(f"{i}. {step}")
+            
+            comment_lines.append("")
+        
+        # 添加时间戳和签名
+        comment_lines.extend([
+            "---",
+            f"自动生成于 {timestamp} by DevFlow MCP"
+        ])
+        
+        comment_content = "\n".join(comment_lines)
+        
+        # 4. 添加评论到 Jira
+        comment_input = JiraAddCommentInput(
+            issueKey=jira_issue_key,
+            comment=comment_content,
+            visibility=input.visibility,
+            mentionUsers=input.mentionUsers
+        )
+        
+        comment_result = jira_add_comment(comment_input)
+        
+        return JiraMarkProgressOutput(
+            taskKey=input.taskKey,
+            jiraIssueKey=jira_issue_key,
+            commentId=comment_result.commentId,
+            commentUrl=comment_result.url,
+            markContent=comment_content,
+            timestamp=timestamp,
+            success=comment_result.commentId is not None,
+            hint=comment_result.hint
+        )
+        
+    except Exception as e:
+        return JiraMarkProgressOutput(
+            taskKey=input.taskKey,
+            jiraIssueKey=jira_issue_key,
+            commentId=None,
+            commentUrl=None,
+            markContent="",
+            timestamp=timestamp,
+            success=False,
+            hint=f"标记进展失败: {str(e)}"
+        )
+
+# ---------- Wiki (Confluence) 集成功能 ----------
+
+def _get_wiki_session() -> Session:
+    """获取 Wiki (Confluence) 会话"""
+    session = Session()
+    
+    # 基本认证
+    wiki_user = os.getenv("WIKI_USER")
+    wiki_password = os.getenv("WIKI_USER_PASSWORD") or os.getenv("WIKI_PASSWORD")
+    
+    if wiki_user and wiki_password:
+        session.auth = (wiki_user, wiki_password)
+    
+    # 设置请求头
+    session.headers.update({
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "DevFlow-MCP/1.0"
+    })
+    
+    return session
+
+
+def _wiki_api_url(endpoint: str) -> str:
+    """构建 Wiki API URL"""
+    base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+    context_path = os.getenv("WIKI_CONTEXT_PATH", "").strip("/")
+    api_version = os.getenv("WIKI_API_VERSION", "latest")
+    
+    # 根据您的Wiki系统API结构调整
+    if context_path:
+        if api_version == "1":
+            return f"{base_url}/{context_path}/rest/api/{endpoint}"
+        elif api_version == "1.0":
+            return f"{base_url}/{context_path}/rest/api/1.0/{endpoint}"
+        elif api_version == "" or api_version == "latest":
+            return f"{base_url}/{context_path}/rest/api/{endpoint}"
+        else:
+            return f"{base_url}/{context_path}/rest/api/{api_version}/{endpoint}"
+    else:
+        if api_version == "1":
+            return f"{base_url}/rest/api/{endpoint}"
+        elif api_version == "1.0":
+            return f"{base_url}/rest/api/1.0/{endpoint}"
+        elif api_version == "" or api_version == "latest":
+            return f"{base_url}/rest/api/{endpoint}"
+        else:
+            return f"{base_url}/rest/api/{api_version}/{endpoint}"
+
+
+def _parse_wiki_url(wiki_url: str) -> Dict[str, Optional[str]]:
+    """解析Wiki URL，提取空间键和页面标题或ID"""
+    try:
+        from urllib.parse import urlparse, parse_qs, unquote
+        
+        parsed = urlparse(wiki_url)
+        result = {"spaceKey": None, "pageTitle": None, "pageId": None}
+        
+        # 处理不同类型的Wiki URL
+        path = parsed.path
+        query = parse_qs(parsed.query)
+        
+        # 类型1: /display/SPACE/Page+Title
+        if "/display/" in path:
+            parts = path.split("/display/")
+            if len(parts) > 1:
+                remaining = parts[1].split("/", 1)
+                if len(remaining) >= 1:
+                    result["spaceKey"] = remaining[0]
+                if len(remaining) >= 2:
+                    # 解码URL编码的标题，并将+替换为空格
+                    page_title = unquote(remaining[1]).replace("+", " ")
+                    result["pageTitle"] = page_title
+        
+        # 类型2: /pages/viewpage.action?spaceKey=SPACE&title=Page+Title
+        elif "/pages/viewpage.action" in path:
+            if "spaceKey" in query:
+                result["spaceKey"] = query["spaceKey"][0]
+            if "title" in query:
+                result["pageTitle"] = unquote(query["title"][0]).replace("+", " ")
+            if "pageId" in query:
+                result["pageId"] = query["pageId"][0]
+        
+        # 类型3: /spaces/SPACE/pages/123456/Page+Title
+        elif "/spaces/" in path and "/pages/" in path:
+            parts = path.split("/")
+            try:
+                space_idx = parts.index("spaces")
+                pages_idx = parts.index("pages")
+                if space_idx + 1 < len(parts):
+                    result["spaceKey"] = parts[space_idx + 1]
+                if pages_idx + 1 < len(parts):
+                    # 检查是否是数字ID
+                    potential_id = parts[pages_idx + 1]
+                    if potential_id.isdigit():
+                        result["pageId"] = potential_id
+                        # 如果还有后续部分，那可能是标题
+                        if pages_idx + 2 < len(parts):
+                            result["pageTitle"] = unquote(parts[pages_idx + 2]).replace("+", " ")
+            except ValueError:
+                pass
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error parsing Wiki URL: {e}")
+        return {"spaceKey": None, "pageTitle": None, "pageId": None}
+
+
+class WikiCreatePageInput(BaseModel):
+    """Wiki 创建页面的输入参数"""
+    model_config = ConfigDict(title="WikiCreatePageInput", description="Wiki 创建页面的输入参数")
+    spaceKey: str = Field(..., description="空间键值")
+    title: str = Field(..., description="页面标题")
+    content: str = Field(..., description="页面内容（支持Confluence存储格式或HTML）")
+    parentPageId: Optional[str] = Field(None, description="父页面ID（可选）")
+    labels: List[str] = Field(default_factory=list, description="页面标签")
+    contentFormat: str = Field("storage", description="内容格式：storage/view/html")
+
+
+class WikiCreatePageOutput(BaseModel):
+    pageId: Optional[str] = None
+    title: str
+    url: Optional[str] = None
+    spaceKey: str
+    version: int = 1
+    hint: str
+
+
+class WikiUpdatePageInput(BaseModel):
+    """Wiki 更新页面的输入参数"""
+    model_config = ConfigDict(title="WikiUpdatePageInput", description="Wiki 更新页面的输入参数")
+    pageId: str = Field(..., description="页面ID")
+    title: Optional[str] = Field(None, description="新标题（可选）")
+    content: Optional[str] = Field(None, description="新内容（可选）")
+    labels: Optional[List[str]] = Field(None, description="新标签（可选）")
+    contentFormat: str = Field("storage", description="内容格式：storage/view/html")
+    versionComment: str = Field("Updated by DevFlow MCP", description="版本注释")
+
+
+class WikiUpdatePageOutput(BaseModel):
+    pageId: str
+    title: str
+    url: Optional[str] = None
+    version: int
+    hint: str
+
+
+class WikiSearchInput(BaseModel):
+    """Wiki 搜索的输入参数"""
+    model_config = ConfigDict(title="WikiSearchInput", description="Wiki 搜索的输入参数")
+    query: str = Field(..., description="搜索查询")
+    spaceKey: Optional[str] = Field(None, description="限制搜索的空间（可选）")
+    searchType: str = Field("content", description="搜索类型：content/title/space")
+    limit: int = Field(10, description="返回结果数量限制")
+    includeContent: bool = Field(False, description="是否包含页面内容")
+
+
+class WikiSearchOutput(BaseModel):
+    results: List[Dict[str, Any]]
+    totalResults: int
+    hint: str
+
+
+class WikiGetPageInput(BaseModel):
+    """Wiki 获取页面的输入参数"""
+    model_config = ConfigDict(title="WikiGetPageInput", description="Wiki 获取页面的输入参数")
+    pageId: Optional[str] = Field(None, description="页面ID")
+    spaceKey: Optional[str] = Field(None, description="空间键值")
+    title: Optional[str] = Field(None, description="页面标题")
+    expand: List[str] = Field(default_factory=lambda: ["body.storage", "version", "space"], description="扩展字段")
+
+
+class WikiGetPageOutput(BaseModel):
+    pageId: str
+    title: str
+    content: str
+    spaceKey: str
+    version: int
+    url: Optional[str] = None
+    labels: List[str] = Field(default_factory=list)
+    lastModified: str
+    hint: str
+
+
+class WikiPublishTaskInput(BaseModel):
+    """Wiki 发布任务文档的输入参数"""
+    model_config = ConfigDict(title="WikiPublishTaskInput", description="Wiki 发布任务文档的输入参数")
+    taskKey: str = Field(..., description="任务唯一标识")
+    spaceKey: str = Field(..., description="目标Wiki空间")
+    parentPageTitle: Optional[str] = Field(None, description="父页面标题（可选）")
+    includeProcessDocs: bool = Field(True, description="是否包含过程文档")
+    includeIntegrationDoc: bool = Field(True, description="是否包含集成文档")
+    templateStyle: str = Field("standard", description="模板样式：standard/compact/detailed")
+    autoLink: bool = Field(True, description="是否自动创建页面间链接")
+    projectRoot: Optional[str] = Field(None, description="项目根目录")
+
+
+class WikiPublishTaskOutput(BaseModel):
+    taskKey: str
+    mainPageId: str
+    mainPageUrl: str
+    publishedPages: List[Dict[str, str]]
+    spaceKey: str
+    hint: str
+
+
+class WikiAddCommentInput(BaseModel):
+    """Wiki 添加评论的输入参数"""
+    model_config = ConfigDict(title="WikiAddCommentInput", description="Wiki 添加评论的输入参数")
+    pageId: str = Field(..., description="页面ID")
+    comment: str = Field(..., description="评论内容，支持HTML格式")
+    parentCommentId: Optional[str] = Field(None, description="父评论ID，用于回复评论")
+
+
+class WikiAddCommentOutput(BaseModel):
+    commentId: Optional[str] = None
+    pageId: str
+    commentUrl: Optional[str] = None
+    hint: str
+
+
+class WikiGetCommentsInput(BaseModel):
+    """Wiki 获取评论的输入参数"""
+    model_config = ConfigDict(title="WikiGetCommentsInput", description="Wiki 获取评论的输入参数")
+    pageId: str = Field(..., description="页面ID")
+    limit: int = Field(10, description="返回评论数量限制")
+    includeReplies: bool = Field(True, description="是否包含回复评论")
+
+
+class WikiGetCommentsOutput(BaseModel):
+    pageId: str
+    comments: List[Dict[str, Any]]
+    totalComments: int
+    hint: str
+
+
+class WikiUpdateCommentInput(BaseModel):
+    """Wiki 更新评论的输入参数"""
+    model_config = ConfigDict(title="WikiUpdateCommentInput", description="Wiki 更新评论的输入参数")
+    commentId: str = Field(..., description="评论ID")
+    comment: str = Field(..., description="新的评论内容")
+
+
+class WikiUpdateCommentOutput(BaseModel):
+    commentId: str
+    commentUrl: Optional[str] = None
+    hint: str
+
+
+class WikiDeleteCommentInput(BaseModel):
+    """Wiki 删除评论的输入参数"""
+    model_config = ConfigDict(title="WikiDeleteCommentInput", description="Wiki 删除评论的输入参数")
+    commentId: str = Field(..., description="要删除的评论ID")
+
+
+class WikiDeleteCommentOutput(BaseModel):
+    commentId: str
+    success: bool
+    hint: str
+
+
+class WikiReadUrlInput(BaseModel):
+    """Wiki 根据URL读取页面的输入参数"""
+    model_config = ConfigDict(title="WikiReadUrlInput", description="Wiki 根据URL读取页面的输入参数")
+    url: str = Field(..., description="Wiki页面的完整URL")
+    includeComments: bool = Field(False, description="是否包含页面评论")
+    includeAttachments: bool = Field(False, description="是否包含页面附件信息")
+
+
+class WikiReadUrlOutput(BaseModel):
+    pageId: str
+    title: str
+    content: str
+    spaceKey: str
+    spaceName: str
+    version: int
+    url: str
+    labels: List[str] = Field(default_factory=list)
+    lastModified: str
+    author: str
+    comments: List[Dict[str, Any]] = Field(default_factory=list)
+    attachments: List[Dict[str, Any]] = Field(default_factory=list)
+    breadcrumb: List[Dict[str, str]] = Field(default_factory=list)
+    hint: str
+
+
+class WikiDiagnosticInput(BaseModel):
+    pageId: str
+    testComment: Optional[str] = "测试评论"
+
+
+class WikiDiagnosticOutput(BaseModel):
+    pageId: str
+    apiTests: Dict[str, Any]
+    recommendations: List[str]
+    hint: str
+
+
+@app.tool()
+def wiki_create_page(input: WikiCreatePageInput) -> WikiCreatePageOutput:
+    """在 Wiki (Confluence) 中创建新页面。"""
+    try:
+        session = _get_wiki_session()
+        url = _wiki_api_url("content")
+        
+        # 构建页面数据
+        page_data = {
+            "type": "page",
+            "title": input.title,
+            "space": {"key": input.spaceKey},
+            "body": {
+                input.contentFormat: {
+                    "value": input.content,
+                    "representation": input.contentFormat
+                }
+            }
+        }
+        
+        # 添加父页面
+        if input.parentPageId:
+            page_data["ancestors"] = [{"id": input.parentPageId}]
+        
+        # 添加标签
+        if input.labels:
+            page_data["metadata"] = {
+                "labels": [{"name": label} for label in input.labels]
+            }
+        
+        resp = session.post(url, json=page_data, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiCreatePageOutput(
+                pageId=None,
+                title=input.title,
+                url=None,
+                spaceKey=input.spaceKey,
+                version=1,
+                hint=f"Failed to create page: {resp.status_code} {resp.text}"
+            )
+        
+        result = resp.json()
+        page_id = result.get("id")
+        
+        # 构建页面URL
+        base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+        page_url = f"{base_url}/display/{input.spaceKey}/{input.title.replace(' ', '+')}" if page_id else None
+        
+        return WikiCreatePageOutput(
+            pageId=page_id,
+            title=result.get("title", input.title),
+            url=page_url,
+            spaceKey=input.spaceKey,
+            version=result.get("version", {}).get("number", 1),
+            hint=f"Page created successfully in space {input.spaceKey}"
+        )
+        
+    except Exception as e:
+        return WikiCreatePageOutput(
+            pageId=None,
+            title=input.title,
+            url=None,
+            spaceKey=input.spaceKey,
+            version=1,
+            hint=f"Error creating page: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_update_page(input: WikiUpdatePageInput) -> WikiUpdatePageOutput:
+    """更新 Wiki (Confluence) 页面内容。"""
+    try:
+        session = _get_wiki_session()
+        
+        # 先获取当前页面信息
+        get_url = _wiki_api_url(f"content/{input.pageId}?expand=version,space")
+        get_resp = session.get(get_url, timeout=30)
+        
+        if get_resp.status_code >= 400:
+            return WikiUpdatePageOutput(
+                pageId=input.pageId,
+                title="",
+                url=None,
+                version=1,
+                hint=f"Failed to get current page: {get_resp.status_code}"
+            )
+        
+        current_page = get_resp.json()
+        current_version = current_page.get("version", {}).get("number", 1)
+        current_title = current_page.get("title", "")
+        space_key = current_page.get("space", {}).get("key", "")
+        
+        # 构建更新数据
+        update_data = {
+            "id": input.pageId,
+            "type": "page",
+            "title": input.title or current_title,
+            "version": {
+                "number": current_version + 1,
+                "message": input.versionComment
+            }
+        }
+        
+        # 更新内容
+        if input.content:
+            update_data["body"] = {
+                input.contentFormat: {
+                    "value": input.content,
+                    "representation": input.contentFormat
+                }
+            }
+        
+        # 更新标签
+        if input.labels is not None:
+            update_data["metadata"] = {
+                "labels": [{"name": label} for label in input.labels]
+            }
+        
+        # 发送更新请求
+        update_url = _wiki_api_url(f"content/{input.pageId}")
+        resp = session.put(update_url, json=update_data, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiUpdatePageOutput(
+                pageId=input.pageId,
+                title=current_title,
+                url=None,
+                version=current_version,
+                hint=f"Failed to update page: {resp.status_code} {resp.text}"
+            )
+        
+        result = resp.json()
+        
+        # 构建页面URL
+        base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+        page_title = result.get("title", current_title)
+        page_url = f"{base_url}/display/{space_key}/{page_title.replace(' ', '+')}"
+        
+        return WikiUpdatePageOutput(
+            pageId=input.pageId,
+            title=page_title,
+            url=page_url,
+            version=result.get("version", {}).get("number", current_version + 1),
+            hint=f"Page updated successfully (version {current_version + 1})"
+        )
+        
+    except Exception as e:
+        return WikiUpdatePageOutput(
+            pageId=input.pageId,
+            title="",
+            url=None,
+            version=1,
+            hint=f"Error updating page: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_search_pages(input: WikiSearchInput) -> WikiSearchOutput:
+    """在 Wiki (Confluence) 中搜索页面。"""
+    try:
+        session = _get_wiki_session()
+        
+        # 构建搜索参数
+        params = {
+            "cql": f"text ~ \"{input.query}\"",
+            "limit": input.limit
+        }
+        
+        # 限制搜索空间
+        if input.spaceKey:
+            params["cql"] += f" and space = {input.spaceKey}"
+        
+        # 根据搜索类型调整查询
+        if input.searchType == "title":
+            params["cql"] = f"title ~ \"{input.query}\""
+            if input.spaceKey:
+                params["cql"] += f" and space = {input.spaceKey}"
+        elif input.searchType == "space":
+            params["cql"] = f"space = {input.query}"
+        
+        # 设置扩展字段
+        expand_fields = ["version", "space"]
+        if input.includeContent:
+            expand_fields.append("body.storage")
+        params["expand"] = ",".join(expand_fields)
+        
+        url = _wiki_api_url("content/search")
+        resp = session.get(url, params=params, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiSearchOutput(
+                results=[],
+                totalResults=0,
+                hint=f"Search failed: {resp.status_code} {resp.text}"
+            )
+        
+        data = resp.json()
+        results = data.get("results", [])
+        
+        # 处理搜索结果
+        processed_results = []
+        for result in results:
+            processed_result = {
+                "id": result.get("id"),
+                "title": result.get("title"),
+                "type": result.get("type"),
+                "spaceKey": result.get("space", {}).get("key"),
+                "spaceName": result.get("space", {}).get("name"),
+                "version": result.get("version", {}).get("number"),
+                "lastModified": result.get("version", {}).get("when"),
+                "url": result.get("_links", {}).get("webui")
+            }
+            
+            # 添加内容（如果请求）
+            if input.includeContent and "body" in result:
+                processed_result["content"] = result.get("body", {}).get("storage", {}).get("value", "")
+            
+            processed_results.append(processed_result)
+        
+        return WikiSearchOutput(
+            results=processed_results,
+            totalResults=data.get("size", len(results)),
+            hint=f"Found {len(results)} results for query: {input.query}"
+        )
+        
+    except Exception as e:
+        return WikiSearchOutput(
+            results=[],
+            totalResults=0,
+            hint=f"Search error: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_get_page(input: WikiGetPageInput) -> WikiGetPageOutput:
+    """获取 Wiki (Confluence) 页面详情。"""
+    try:
+        session = _get_wiki_session()
+        
+        # 确定页面查询方式
+        if input.pageId:
+            url = _wiki_api_url(f"content/{input.pageId}")
+        elif input.spaceKey and input.title:
+            # 通过空间和标题搜索
+            search_params = {
+                "spaceKey": input.spaceKey,
+                "title": input.title,
+                "expand": ",".join(input.expand)
+            }
+            url = _wiki_api_url("content")
+        else:
+            return WikiGetPageOutput(
+                pageId="",
+                title="",
+                content="",
+                spaceKey="",
+                version=0,
+                url=None,
+                lastModified="",
+                hint="Must provide either pageId or both spaceKey and title"
+            )
+        
+        # 设置扩展参数
+        params = {"expand": ",".join(input.expand)}
+        if not input.pageId:
+            params.update(search_params)
+        
+        resp = session.get(url, params=params, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiGetPageOutput(
+                pageId="",
+                title="",
+                content="",
+                spaceKey="",
+                version=0,
+                url=None,
+                lastModified="",
+                hint=f"Failed to get page: {resp.status_code} {resp.text}"
+            )
+        
+        data = resp.json()
+        
+        # 处理搜索结果（如果是通过标题搜索）
+        if not input.pageId and "results" in data:
+            if not data["results"]:
+                return WikiGetPageOutput(
+                    pageId="",
+                    title=input.title or "",
+                    content="",
+                    spaceKey=input.spaceKey or "",
+                    version=0,
+                    url=None,
+                    lastModified="",
+                    hint=f"Page not found: {input.title}"
+                )
+            data = data["results"][0]
+        
+        # 提取页面信息
+        page_id = data.get("id", "")
+        title = data.get("title", "")
+        space_key = data.get("space", {}).get("key", "")
+        version = data.get("version", {}).get("number", 0)
+        last_modified = data.get("version", {}).get("when", "")
+        
+        # 提取内容
+        content = ""
+        if "body" in data and "storage" in data["body"]:
+            content = data["body"]["storage"].get("value", "")
+        
+        # 提取标签
+        labels = []
+        if "metadata" in data and "labels" in data["metadata"]:
+            labels = [label.get("name", "") for label in data["metadata"]["labels"].get("results", [])]
+        
+        # 构建页面URL
+        base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+        page_url = f"{base_url}/display/{space_key}/{title.replace(' ', '+')}" if page_id else None
+        
+        return WikiGetPageOutput(
+            pageId=page_id,
+            title=title,
+            content=content,
+            spaceKey=space_key,
+            version=version,
+            url=page_url,
+            labels=labels,
+            lastModified=last_modified,
+            hint=f"Page retrieved successfully: {title}"
+        )
+        
+    except Exception as e:
+        return WikiGetPageOutput(
+            pageId="",
+            title="",
+            content="",
+            spaceKey="",
+            version=0,
+            url=None,
+            lastModified="",
+            hint=f"Error getting page: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_read_url(input: WikiReadUrlInput) -> WikiReadUrlOutput:
+    """根据Wiki URL直接读取页面内容，支持多种URL格式。"""
+    try:
+        # 解析URL获取页面信息
+        parsed_info = _parse_wiki_url(input.url)
+        
+        if not parsed_info["spaceKey"] and not parsed_info["pageId"]:
+            return WikiReadUrlOutput(
+                pageId="",
+                title="",
+                content="",
+                spaceKey="",
+                spaceName="",
+                version=0,
+                url=input.url,
+                lastModified="",
+                author="",
+                hint="无法从URL中解析出有效的空间键或页面ID"
+            )
+        
+        session = _get_wiki_session()
+        
+        # 根据解析结果获取页面
+        if parsed_info["pageId"]:
+            # 通过页面ID获取
+            page_result = wiki_get_page(WikiGetPageInput(
+                pageId=parsed_info["pageId"],
+                expand=["body.storage", "version", "space", "metadata.labels", "ancestors"]
+            ))
+        elif parsed_info["spaceKey"] and parsed_info["pageTitle"]:
+            # 通过空间和标题获取
+            page_result = wiki_get_page(WikiGetPageInput(
+                spaceKey=parsed_info["spaceKey"],
+                title=parsed_info["pageTitle"],
+                expand=["body.storage", "version", "space", "metadata.labels", "ancestors"]
+            ))
+        else:
+            return WikiReadUrlOutput(
+                pageId="",
+                title="",
+                content="",
+                spaceKey="",
+                spaceName="",
+                version=0,
+                url=input.url,
+                lastModified="",
+                author="",
+                hint="URL解析不完整，无法定位页面"
+            )
+        
+        if not page_result.pageId:
+            return WikiReadUrlOutput(
+                pageId="",
+                title="",
+                content="",
+                spaceKey=parsed_info.get("spaceKey", ""),
+                spaceName="",
+                version=0,
+                url=input.url,
+                lastModified="",
+                author="",
+                hint=f"页面未找到: {page_result.hint}"
+            )
+        
+        # 获取空间信息
+        space_name = ""
+        try:
+            space_url = _wiki_api_url(f"space/{page_result.spaceKey}")
+            space_resp = session.get(space_url, timeout=30)
+            if space_resp.status_code == 200:
+                space_data = space_resp.json()
+                space_name = space_data.get("name", "")
+        except:
+            pass
+        
+        # 获取作者信息
+        author = ""
+        try:
+            page_url = _wiki_api_url(f"content/{page_result.pageId}?expand=version.by")
+            page_resp = session.get(page_url, timeout=30)
+            if page_resp.status_code == 200:
+                page_data = page_resp.json()
+                author = page_data.get("version", {}).get("by", {}).get("displayName", "")
+        except:
+            pass
+        
+        # 获取面包屑导航
+        breadcrumb = []
+        try:
+            ancestors_url = _wiki_api_url(f"content/{page_result.pageId}?expand=ancestors")
+            ancestors_resp = session.get(ancestors_url, timeout=30)
+            if ancestors_resp.status_code == 200:
+                ancestors_data = ancestors_resp.json()
+                ancestors = ancestors_data.get("ancestors", [])
+                for ancestor in ancestors:
+                    breadcrumb.append({
+                        "id": ancestor.get("id", ""),
+                        "title": ancestor.get("title", ""),
+                        "type": ancestor.get("type", "")
+                    })
+        except:
+            pass
+        
+        result = WikiReadUrlOutput(
+            pageId=page_result.pageId,
+            title=page_result.title,
+            content=page_result.content,
+            spaceKey=page_result.spaceKey,
+            spaceName=space_name,
+            version=page_result.version,
+            url=input.url,
+            labels=page_result.labels,
+            lastModified=page_result.lastModified,
+            author=author,
+            breadcrumb=breadcrumb,
+            hint=f"成功读取页面: {page_result.title}"
+        )
+        
+        # 获取评论（如果需要）
+        if input.includeComments:
+            try:
+                comments_result = wiki_get_comments(WikiGetCommentsInput(
+                    pageId=page_result.pageId,
+                    limit=50,
+                    includeReplies=True
+                ))
+                result.comments = comments_result.comments
+            except Exception as e:
+                print(f"Failed to get comments: {e}")
+        
+        # 获取附件信息（如果需要）
+        if input.includeAttachments:
+            try:
+                attachments_url = _wiki_api_url(f"content/{page_result.pageId}/child/attachment")
+                attachments_resp = session.get(attachments_url, timeout=30)
+                if attachments_resp.status_code == 200:
+                    attachments_data = attachments_resp.json()
+                    attachments = []
+                    for attachment in attachments_data.get("results", []):
+                        attachments.append({
+                            "id": attachment.get("id"),
+                            "title": attachment.get("title"),
+                            "mediaType": attachment.get("metadata", {}).get("mediaType", ""),
+                            "fileSize": attachment.get("extensions", {}).get("fileSize", 0),
+                            "downloadUrl": attachment.get("_links", {}).get("download", ""),
+                            "version": attachment.get("version", {}).get("number", 1),
+                            "createdDate": attachment.get("version", {}).get("when", "")
+                        })
+                    result.attachments = attachments
+            except Exception as e:
+                print(f"Failed to get attachments: {e}")
+        
+        return result
+        
+    except Exception as e:
+        return WikiReadUrlOutput(
+            pageId="",
+            title="",
+            content="",
+            spaceKey="",
+            spaceName="",
+            version=0,
+            url=input.url,
+            lastModified="",
+            author="",
+            hint=f"读取页面时出错: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_add_comment(input: WikiAddCommentInput) -> WikiAddCommentOutput:
+    """向 Wiki 页面添加评论。"""
+    try:
+        session = _get_wiki_session()
+        
+        # 首先尝试使用TinyMCE API（更现代的方式）
+        base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+        context_path = os.getenv("WIKI_CONTEXT_PATH", "").strip("/")
+        
+        # 尝试多种TinyMCE API版本
+        tinymce_urls = []
+        if context_path:
+            tinymce_urls = [
+                f"{base_url}/{context_path}/rest/tinymce/1/content/{input.pageId}/comment",
+                f"{base_url}/{context_path}/rest/tinymce/1.0/content/{input.pageId}/comment"
+            ]
+        else:
+            tinymce_urls = [
+                f"{base_url}/rest/tinymce/1/content/{input.pageId}/comment",
+                f"{base_url}/rest/tinymce/1.0/content/{input.pageId}/comment"
+            ]
+        
+        # 构建TinyMCE评论数据
+        tinymce_data = {
+            "body": input.comment,
+            "actions": True
+        }
+        
+        # 如果是回复评论，添加父评论信息
+        if input.parentCommentId:
+            tinymce_data["parentId"] = input.parentCommentId
+        
+        # 尝试多个TinyMCE API版本
+        tinymce_success = False
+        resp = None
+        for tinymce_url in tinymce_urls:
+            try:
+                resp = session.post(tinymce_url, json=tinymce_data, timeout=30)
+                if resp.status_code < 400:
+                    tinymce_success = True
+                    break
+            except Exception as e:
+                print(f"TinyMCE API {tinymce_url} failed: {e}")
+                continue
+        
+        if tinymce_success and resp and resp.status_code < 400:
+            # TinyMCE API成功
+            result = resp.json()
+            comment_id = result.get("id")
+            comment_url = f"{base_url}/pages/viewpage.action?pageId={input.pageId}#comment-{comment_id}" if comment_id else None
+            
+            return WikiAddCommentOutput(
+                commentId=comment_id,
+                pageId=input.pageId,
+                commentUrl=comment_url,
+                hint=f"Comment added successfully via TinyMCE API to page {input.pageId}"
+            )
+        
+        # 如果TinyMCE API失败，回退到标准REST API
+        print(f"TinyMCE API failed ({resp.status_code}), falling back to standard REST API")
+        
+        # 构建标准API评论数据
+        comment_data = {
+            "type": "comment",
+            "container": {"id": input.pageId, "type": "page"},
+            "body": {
+                "storage": {
+                    "value": input.comment,
+                    "representation": "storage"
+                }
+            }
+        }
+        
+        # 如果是回复评论，添加父评论信息
+        if input.parentCommentId:
+            comment_data["ancestors"] = [{"id": input.parentCommentId}]
+        
+        url = _wiki_api_url("content")
+        resp = session.post(url, json=comment_data, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiAddCommentOutput(
+                commentId=None,
+                pageId=input.pageId,
+                commentUrl=None,
+                hint=f"Failed to add comment via both APIs. TinyMCE: {tinymce_url}, REST: {url}. Last error: {resp.status_code} {resp.text}"
+            )
+        
+        result = resp.json()
+        comment_id = result.get("id")
+        
+        # 构建评论链接
+        comment_url = f"{base_url}/pages/viewpage.action?pageId={input.pageId}#comment-{comment_id}" if comment_id else None
+        
+        return WikiAddCommentOutput(
+            commentId=comment_id,
+            pageId=input.pageId,
+            commentUrl=comment_url,
+            hint=f"Comment added successfully via REST API to page {input.pageId}"
+        )
+        
+    except Exception as e:
+        return WikiAddCommentOutput(
+            commentId=None,
+            pageId=input.pageId,
+            commentUrl=None,
+            hint=f"Error adding comment: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_get_comments(input: WikiGetCommentsInput) -> WikiGetCommentsOutput:
+    """获取 Wiki 页面的评论列表。"""
+    try:
+        session = _get_wiki_session()
+        
+        # 尝试多种评论API路径
+        base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+        context_path = os.getenv("WIKI_CONTEXT_PATH", "").strip("/")
+        
+        # 构建多个可能的评论API URL
+        comment_urls = []
+        if context_path:
+            comment_urls = [
+                f"{base_url}/{context_path}/rest/tinymce/1/content/{input.pageId}/comment",
+                f"{base_url}/{context_path}/rest/tinymce/1.0/content/{input.pageId}/comment",
+                f"{base_url}/{context_path}/rest/api/content/{input.pageId}/child/comment",
+                f"{base_url}/{context_path}/rest/api/1.0/content/{input.pageId}/child/comment",
+            ]
+        else:
+            comment_urls = [
+                f"{base_url}/rest/tinymce/1/content/{input.pageId}/comment",
+                f"{base_url}/rest/tinymce/1.0/content/{input.pageId}/comment", 
+                f"{base_url}/rest/api/content/{input.pageId}/child/comment",
+                f"{base_url}/rest/api/1.0/content/{input.pageId}/child/comment",
+            ]
+        
+        # 尝试每个API直到找到可用的
+        successful_response = None
+        successful_url = None
+        
+        for comment_url in comment_urls:
+            try:
+                params = {"limit": input.limit}
+                resp = session.get(comment_url, params=params, timeout=30)
+                
+                if resp.status_code == 200:
+                    successful_response = resp
+                    successful_url = comment_url
+                    break
+                elif resp.status_code == 501:
+                    print(f"API not implemented: {comment_url}")
+                    continue
+                else:
+                    print(f"API failed with {resp.status_code}: {comment_url}")
+                    continue
+                    
+            except Exception as e:
+                print(f"Exception with {comment_url}: {e}")
+                continue
+        
+        if successful_response and successful_response.status_code == 200:
+            # API成功
+            try:
+                data = successful_response.json()
+                comments_data = data.get("results", []) if isinstance(data, dict) else data
+                
+                processed_comments = []
+                for comment in comments_data:
+                    comment_info = {
+                        "id": comment.get("id"),
+                        "title": comment.get("title", ""),
+                        "content": comment.get("body", comment.get("content", "")),
+                        "author": comment.get("author", {}).get("displayName", "Unknown") if isinstance(comment.get("author"), dict) else comment.get("author", "Unknown"),
+                        "authorEmail": comment.get("author", {}).get("email", "") if isinstance(comment.get("author"), dict) else "",
+                        "createdDate": comment.get("createdDate", comment.get("created", "")),
+                        "version": comment.get("version", 1),
+                        "isReply": bool(comment.get("parentId") or comment.get("parent"))
+                    }
+                    
+                    # 如果是回复，添加父评论信息
+                    if comment_info["isReply"]:
+                        comment_info["parentCommentId"] = comment.get("parentId", comment.get("parent", {}).get("id"))
+                    
+                    processed_comments.append(comment_info)
+                
+                # 如果不包含回复，过滤掉回复评论
+                if not input.includeReplies:
+                    processed_comments = [c for c in processed_comments if not c["isReply"]]
+                
+                return WikiGetCommentsOutput(
+                    pageId=input.pageId,
+                    comments=processed_comments,
+                    totalComments=len(processed_comments),
+                    hint=f"Retrieved {len(processed_comments)} comments via {successful_url} for page {input.pageId}"
+                )
+            except Exception as parse_e:
+                print(f"Failed to parse response: {parse_e}")
+        
+        # 如果所有评论API都失败，返回错误信息
+        if not successful_response:
+            return WikiGetCommentsOutput(
+                pageId=input.pageId,
+                comments=[],
+                totalComments=0,
+                hint=f"All comment APIs failed (501 Not Implemented). Tried: {', '.join(comment_urls)}"
+            )
+        
+        # 构建查询参数
+        params = {
+            "type": "comment",
+            "container": input.pageId,
+            "limit": input.limit,
+            "expand": "body.storage,version,ancestors"
+        }
+        
+        url = _wiki_api_url("content")
+        resp = session.get(url, params=params, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiGetCommentsOutput(
+                pageId=input.pageId,
+                comments=[],
+                totalComments=0,
+                hint=f"Failed to get comments via all APIs. Tried: {', '.join(comment_urls)}. No successful response."
+            )
+        
+        data = resp.json()
+        comments_data = data.get("results", [])
+        
+        # 处理评论数据
+        processed_comments = []
+        for comment in comments_data:
+            comment_info = {
+                "id": comment.get("id"),
+                "title": comment.get("title", ""),
+                "content": comment.get("body", {}).get("storage", {}).get("value", ""),
+                "author": comment.get("version", {}).get("by", {}).get("displayName", "Unknown"),
+                "authorEmail": comment.get("version", {}).get("by", {}).get("email", ""),
+                "createdDate": comment.get("version", {}).get("when", ""),
+                "version": comment.get("version", {}).get("number", 1),
+                "isReply": bool(comment.get("ancestors", []))
+            }
+            
+            # 如果是回复，添加父评论信息
+            if comment_info["isReply"] and comment.get("ancestors"):
+                parent = comment["ancestors"][-1]  # 最后一个ancestor是直接父级
+                comment_info["parentCommentId"] = parent.get("id")
+            
+            processed_comments.append(comment_info)
+        
+        # 如果不包含回复，过滤掉回复评论
+        if not input.includeReplies:
+            processed_comments = [c for c in processed_comments if not c["isReply"]]
+        
+        return WikiGetCommentsOutput(
+            pageId=input.pageId,
+            comments=processed_comments,
+            totalComments=len(processed_comments),
+            hint=f"Retrieved {len(processed_comments)} comments via REST API for page {input.pageId}"
+        )
+        
+    except Exception as e:
+        return WikiGetCommentsOutput(
+            pageId=input.pageId,
+            comments=[],
+            totalComments=0,
+            hint=f"Error getting comments: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_update_comment(input: WikiUpdateCommentInput) -> WikiUpdateCommentOutput:
+    """更新 Wiki 评论内容。"""
+    try:
+        session = _get_wiki_session()
+        
+        # 先获取当前评论信息
+        get_url = _wiki_api_url(f"content/{input.commentId}?expand=version,container")
+        get_resp = session.get(get_url, timeout=30)
+        
+        if get_resp.status_code >= 400:
+            return WikiUpdateCommentOutput(
+                commentId=input.commentId,
+                commentUrl=None,
+                hint=f"Failed to get current comment: {get_resp.status_code}"
+            )
+        
+        current_comment = get_resp.json()
+        current_version = current_comment.get("version", {}).get("number", 1)
+        container_id = current_comment.get("container", {}).get("id")
+        
+        # 构建更新数据
+        update_data = {
+            "id": input.commentId,
+            "type": "comment",
+            "version": {
+                "number": current_version + 1
+            },
+            "body": {
+                "storage": {
+                    "value": input.comment,
+                    "representation": "storage"
+                }
+            }
+        }
+        
+        # 发送更新请求
+        update_url = _wiki_api_url(f"content/{input.commentId}")
+        resp = session.put(update_url, json=update_data, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiUpdateCommentOutput(
+                commentId=input.commentId,
+                commentUrl=None,
+                hint=f"Failed to update comment: {resp.status_code} {resp.text}"
+            )
+        
+        # 构建评论链接
+        base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+        comment_url = f"{base_url}/pages/viewpage.action?pageId={container_id}#comment-{input.commentId}" if container_id else None
+        
+        return WikiUpdateCommentOutput(
+            commentId=input.commentId,
+            commentUrl=comment_url,
+            hint=f"Comment {input.commentId} updated successfully"
+        )
+        
+    except Exception as e:
+        return WikiUpdateCommentOutput(
+            commentId=input.commentId,
+            commentUrl=None,
+            hint=f"Error updating comment: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_delete_comment(input: WikiDeleteCommentInput) -> WikiDeleteCommentOutput:
+    """删除 Wiki 评论。"""
+    try:
+        session = _get_wiki_session()
+        
+        url = _wiki_api_url(f"content/{input.commentId}")
+        resp = session.delete(url, timeout=30)
+        
+        if resp.status_code >= 400:
+            return WikiDeleteCommentOutput(
+                commentId=input.commentId,
+                success=False,
+                hint=f"Failed to delete comment: {resp.status_code} {resp.text}"
+            )
+        
+        return WikiDeleteCommentOutput(
+            commentId=input.commentId,
+            success=True,
+            hint=f"Comment {input.commentId} deleted successfully"
+        )
+        
+    except Exception as e:
+        return WikiDeleteCommentOutput(
+            commentId=input.commentId,
+            success=False,
+            hint=f"Error deleting comment: {str(e)}"
+        )
+
+
+@app.tool()
+def wiki_publish_task(input: WikiPublishTaskInput) -> WikiPublishTaskOutput:
+    """将DevFlow任务文档发布到Wiki，创建结构化的文档页面。"""
+    try:
+        project_root = _resolve_project_root(input.projectRoot)
+        published_pages = []
+        
+        # 1. 获取任务信息
+        task_metadata = _get_task_metadata(project_root, input.taskKey)
+        task_title = task_metadata.get("title", input.taskKey)
+        
+        # 2. 创建主页面
+        main_page_title = f"{input.taskKey} - {task_title}"
+        main_page_content = _generate_wiki_task_overview(
+            project_root, input.taskKey, task_metadata, input.templateStyle
+        )
+        
+        # 查找父页面ID（如果指定）
+        parent_page_id = None
+        if input.parentPageTitle:
+            search_result = wiki_search_pages(WikiSearchInput(
+                query=input.parentPageTitle,
+                spaceKey=input.spaceKey,
+                searchType="title",
+                limit=1
+            ))
+            if search_result.results:
+                parent_page_id = search_result.results[0]["id"]
+        
+        # 创建主页面
+        main_page_result = wiki_create_page(WikiCreatePageInput(
+            spaceKey=input.spaceKey,
+            title=main_page_title,
+            content=main_page_content,
+            parentPageId=parent_page_id,
+            labels=[input.taskKey, "DevFlow", "Task"],
+            contentFormat="storage"
+        ))
+        
+        if not main_page_result.pageId:
+            return WikiPublishTaskOutput(
+                taskKey=input.taskKey,
+                mainPageId="",
+                mainPageUrl="",
+                publishedPages=[],
+                spaceKey=input.spaceKey,
+                hint=f"Failed to create main page: {main_page_result.hint}"
+            )
+        
+        published_pages.append({
+            "title": main_page_title,
+            "pageId": main_page_result.pageId,
+            "url": main_page_result.url or "",
+            "type": "overview"
+        })
+        
+        # 3. 发布过程文档（如果启用）
+        if input.includeProcessDocs:
+            process_dir = project_root / "Docs" / "ProcessDocuments" / f"task-{input.taskKey}"
+            if process_dir.exists():
+                doc_configs = [
+                    ("01-Context.md", "项目背景与目标"),
+                    ("02-Design.md", "设计方案"),
+                    ("03-CodePlan.md", "代码实现计划"),
+                    ("04-TestCurls.md", "测试用例"),
+                    ("05-MySQLVerificationPlan.md", "数据库验证计划"),
+                    ("06-Integration.md", "集成文档"),
+                    ("07-JiraPublishPlan.md", "发布计划")
+                ]
+                
+                for doc_file, doc_title in doc_configs:
+                    doc_path = process_dir / f"{input.taskKey}_{doc_file}"
+                    if doc_path.exists():
+                        try:
+                            # 读取文档内容
+                            post = frontmatter.load(doc_path)
+                            doc_content = post.content
+                            
+                            # 转换为Wiki格式
+                            wiki_content = _convert_markdown_to_confluence(doc_content)
+                            
+                            # 创建子页面
+                            sub_page_title = f"{input.taskKey} - {doc_title}"
+                            sub_page_result = wiki_create_page(WikiCreatePageInput(
+                                spaceKey=input.spaceKey,
+                                title=sub_page_title,
+                                content=wiki_content,
+                                parentPageId=main_page_result.pageId,
+                                labels=[input.taskKey, "DevFlow", "ProcessDoc", doc_file.split('-')[0]],
+                                contentFormat="storage"
+                            ))
+                            
+                            if sub_page_result.pageId:
+                                published_pages.append({
+                                    "title": sub_page_title,
+                                    "pageId": sub_page_result.pageId,
+                                    "url": sub_page_result.url or "",
+                                    "type": "process_doc",
+                                    "docFile": doc_file
+                                })
+                        except Exception as e:
+                            print(f"Failed to publish {doc_file}: {str(e)}")
+        
+        # 4. 发布集成文档（如果启用且存在）
+        if input.includeIntegrationDoc:
+            integration_doc_path = project_root / "Docs" / "ProcessDocuments" / f"task-{input.taskKey}" / f"{input.taskKey}_06-Integration.md"
+            if integration_doc_path.exists():
+                try:
+                    post = frontmatter.load(integration_doc_path)
+                    integration_content = _convert_markdown_to_confluence(post.content)
+                    
+                    integration_page_result = wiki_create_page(WikiCreatePageInput(
+                        spaceKey=input.spaceKey,
+                        title=f"{input.taskKey} - API集成文档",
+                        content=integration_content,
+                        parentPageId=main_page_result.pageId,
+                        labels=[input.taskKey, "DevFlow", "Integration", "API"],
+                        contentFormat="storage"
+                    ))
+                    
+                    if integration_page_result.pageId:
+                        published_pages.append({
+                            "title": f"{input.taskKey} - API集成文档",
+                            "pageId": integration_page_result.pageId,
+                            "url": integration_page_result.url or "",
+                            "type": "integration_doc"
+                        })
+                except Exception as e:
+                    print(f"Failed to publish integration doc: {str(e)}")
+        
+        # 5. 更新主页面，添加子页面链接（如果启用自动链接）
+        if input.autoLink and len(published_pages) > 1:
+            try:
+                updated_main_content = _add_child_page_links(
+                    main_page_content, published_pages[1:], input.spaceKey
+                )
+                
+                wiki_update_page(WikiUpdatePageInput(
+                    pageId=main_page_result.pageId,
+                    content=updated_main_content,
+                    versionComment="Added child page links"
+                ))
+            except Exception as e:
+                print(f"Failed to update main page with links: {str(e)}")
+        
+        return WikiPublishTaskOutput(
+            taskKey=input.taskKey,
+            mainPageId=main_page_result.pageId,
+            mainPageUrl=main_page_result.url or "",
+            publishedPages=published_pages,
+            spaceKey=input.spaceKey,
+            hint=f"Successfully published {len(published_pages)} pages for task {input.taskKey}"
+        )
+        
+    except Exception as e:
+        return WikiPublishTaskOutput(
+            taskKey=input.taskKey,
+            mainPageId="",
+            mainPageUrl="",
+            publishedPages=[],
+            spaceKey=input.spaceKey,
+            hint=f"Error publishing task: {str(e)}"
+        )
+
+
+def _generate_wiki_task_overview(project_root: Path, task_key: str, metadata: Dict[str, Any], style: str) -> str:
+    """生成Wiki任务概览页面内容"""
+    title = metadata.get("title", task_key)
+    owner = metadata.get("owner", "未指定")
+    reviewers = ", ".join(metadata.get("reviewers", []))
+    status = _read_task_status(project_root, task_key)
+    created_at = metadata.get("createdAt", "")
+    updated_at = metadata.get("updatedAt", "")
+    
+    if style == "compact":
+        content = f"""<h1>{task_key} - {title}</h1>
+
+<table>
+<tr><td><strong>任务状态</strong></td><td><ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Blue</ac:parameter><ac:parameter ac:name="title">{status}</ac:parameter></ac:structured-macro></td></tr>
+<tr><td><strong>负责人</strong></td><td>{owner}</td></tr>
+<tr><td><strong>审核人</strong></td><td>{reviewers}</td></tr>
+<tr><td><strong>创建时间</strong></td><td>{created_at}</td></tr>
+<tr><td><strong>更新时间</strong></td><td>{updated_at}</td></tr>
+</table>
+
+<h2>子页面</h2>
+<p><em>相关文档页面将在下方列出</em></p>
+"""
+    elif style == "detailed":
+        # 获取任务进展报告
+        progress_report = _generate_task_progress_report(project_root, task_key)
+        
+        content = f"""<h1>{task_key} - {title}</h1>
+
+<ac:structured-macro ac:name="info" ac:schema-version="1">
+<ac:parameter ac:name="title">任务概览</ac:parameter>
+<ac:rich-text-body>
+<p>本页面包含任务 <strong>{task_key}</strong> 的完整文档和进展信息。</p>
+</ac:rich-text-body>
+</ac:structured-macro>
+
+<h2>基本信息</h2>
+<table>
+<tr><td><strong>任务编号</strong></td><td>{task_key}</td></tr>
+<tr><td><strong>任务标题</strong></td><td>{title}</td></tr>
+<tr><td><strong>当前状态</strong></td><td><ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Blue</ac:parameter><ac:parameter ac:name="title">{status}</ac:parameter></ac:structured-macro></td></tr>
+<tr><td><strong>负责人</strong></td><td>{owner}</td></tr>
+<tr><td><strong>审核人</strong></td><td>{reviewers}</td></tr>
+<tr><td><strong>创建时间</strong></td><td>{created_at}</td></tr>
+<tr><td><strong>最后更新</strong></td><td>{updated_at}</td></tr>
+</table>
+
+<h2>文档状态</h2>
+<table>
+<tr><th>文档类型</th><th>状态</th><th>更新时间</th></tr>
+"""
+        # 添加文档状态信息
+        for doc in progress_report.get("processDocuments", []):
+            status_macro = f'<ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">{doc["status"]}</ac:parameter></ac:structured-macro>'
+            content += f'<tr><td>{doc["name"]}</td><td>{status_macro}</td><td>{doc.get("updatedAt", "N/A")}</td></tr>\n'
+        
+        content += """</table>
+
+<h2>相关页面</h2>
+<p><em>相关文档页面将在下方列出</em></p>
+
+<h2>最新进展</h2>
+<ac:structured-macro ac:name="expand" ac:schema-version="1">
+<ac:parameter ac:name="title">查看详细进展</ac:parameter>
+<ac:rich-text-body>
+<p><em>最新的任务进展信息将通过DevFlow自动更新</em></p>
+</ac:rich-text-body>
+</ac:structured-macro>
+"""
+    else:  # standard
+        content = f"""<h1>{task_key} - {title}</h1>
+
+<ac:structured-macro ac:name="panel" ac:schema-version="1">
+<ac:parameter ac:name="bgColor">#eae6ff</ac:parameter>
+<ac:parameter ac:name="title">任务信息</ac:parameter>
+<ac:rich-text-body>
+<table>
+<tr><td><strong>状态</strong></td><td><ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Blue</ac:parameter><ac:parameter ac:name="title">{status}</ac:parameter></ac:structured-macro></td></tr>
+<tr><td><strong>负责人</strong></td><td>{owner}</td></tr>
+<tr><td><strong>审核人</strong></td><td>{reviewers}</td></tr>
+<tr><td><strong>创建时间</strong></td><td>{created_at}</td></tr>
+<tr><td><strong>更新时间</strong></td><td>{updated_at}</td></tr>
+</table>
+</ac:rich-text-body>
+</ac:structured-macro>
+
+<h2>文档导航</h2>
+<p>本任务的相关文档页面：</p>
+<p><em>子页面链接将自动生成在此处</em></p>
+
+<h2>快速链接</h2>
+<ul>
+<li><a href="/display/{metadata.get('spaceKey', 'DEV')}/DevFlow+Tasks">返回任务列表</a></li>
+</ul>
+"""
+    
+    return content
+
+
+def _convert_markdown_to_confluence(markdown_content: str) -> str:
+    """将Markdown内容转换为Confluence存储格式"""
+    # 这是一个简化的转换器，处理常见的Markdown元素
+    content = markdown_content
+    
+    # 标题转换
+    content = re.sub(r'^# (.*?)$', r'<h1>\1</h1>', content, flags=re.MULTILINE)
+    content = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', content, flags=re.MULTILINE)
+    content = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', content, flags=re.MULTILINE)
+    content = re.sub(r'^#### (.*?)$', r'<h4>\1</h4>', content, flags=re.MULTILINE)
+    
+    # 粗体和斜体
+    content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
+    content = re.sub(r'\*(.*?)\*', r'<em>\1</em>', content)
+    
+    # 代码块
+    content = re.sub(r'```(\w+)?\n(.*?)\n```', 
+                    r'<ac:structured-macro ac:name="code" ac:schema-version="1"><ac:parameter ac:name="language">\1</ac:parameter><ac:plain-text-body><![CDATA[\2]]></ac:plain-text-body></ac:structured-macro>', 
+                    content, flags=re.DOTALL)
+    
+    # 行内代码
+    content = re.sub(r'`(.*?)`', r'<code>\1</code>', content)
+    
+    # 列表转换
+    content = re.sub(r'^- (.*?)$', r'<li>\1</li>', content, flags=re.MULTILINE)
+    content = re.sub(r'^(\d+)\. (.*?)$', r'<li>\2</li>', content, flags=re.MULTILINE)
+    
+    # 包装列表项
+    content = re.sub(r'(<li>.*?</li>\n?)+', r'<ul>\g<0></ul>', content, flags=re.DOTALL)
+    
+    # 链接转换
+    content = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', content)
+    
+    # 段落处理
+    paragraphs = content.split('\n\n')
+    processed_paragraphs = []
+    for para in paragraphs:
+        para = para.strip()
+        if para and not para.startswith('<'):
+            para = f'<p>{para}</p>'
+        processed_paragraphs.append(para)
+    
+    return '\n\n'.join(processed_paragraphs)
+
+
+def _add_child_page_links(main_content: str, child_pages: List[Dict[str, str]], space_key: str) -> str:
+    """在主页面中添加子页面链接"""
+    links_html = "<h3>相关文档</h3>\n<ul>\n"
+    
+    for page in child_pages:
+        page_title = page["title"]
+        page_type = page.get("type", "document")
+        
+        # 根据类型添加图标
+        icon = {
+            "process_doc": "📋",
+            "integration_doc": "🔗",
+            "test_doc": "🧪"
+        }.get(page_type, "📄")
+        
+        links_html += f'<li>{icon} <ac:link><ri:page ri:content-title="{page_title}" ri:space-key="{space_key}"/><ac:plain-text-link-body><![CDATA[{page_title}]]></ac:plain-text-link-body></ac:link></li>\n'
+    
+    links_html += "</ul>\n"
+    
+    # 替换占位符文本
+    if "子页面链接将自动生成在此处" in main_content:
+        return main_content.replace("子页面链接将自动生成在此处", links_html)
+    elif "相关文档页面将在下方列出" in main_content:
+        return main_content.replace("相关文档页面将在下方列出", links_html)
+    else:
+        # 在文档导航部分后添加
+        return main_content + "\n\n" + links_html
+
 
 # ---------- Jira分析与测试对比工具函数 ----------
 
@@ -2446,6 +4600,155 @@ def status_report(input: StatusReportInput) -> StatusReportOutput:
         blockedTasks=blocked_tasks,
         summary=summary
     )
+
+
+@app.tool()
+def wiki_diagnostic(input: WikiDiagnosticInput) -> WikiDiagnosticOutput:
+    """诊断Wiki API连接和页面访问问题，测试不同的API路径。"""
+    try:
+        session = _get_wiki_session()
+        base_url = os.getenv("WIKI_BASE_URL", "").rstrip("/")
+        context_path = os.getenv("WIKI_CONTEXT_PATH", "").strip("/")
+        
+        api_tests = {}
+        recommendations = []
+        
+        # 测试不同的API路径，基于您提供的API结构
+        test_paths = [
+            f"{base_url}/rest/api/content/{input.pageId}",
+            f"{base_url}/rest/api/1.0/content/{input.pageId}",
+            f"{base_url}/rest/api/2.0/content/{input.pageId}",
+            f"{base_url}/rest/tinymce/1/content/{input.pageId}",
+            f"{base_url}/rest/tinymce/1.0/content/{input.pageId}",
+            f"{base_url}/rest/prototype/1/content/{input.pageId}",
+        ]
+        
+        if context_path:
+            test_paths.extend([
+                f"{base_url}/{context_path}/rest/api/content/{input.pageId}",
+                f"{base_url}/{context_path}/rest/api/1/content/{input.pageId}",
+                f"{base_url}/{context_path}/rest/tinymce/1/content/{input.pageId}",
+            ])
+        
+        # 测试每个API路径
+        for path in test_paths:
+            try:
+                params = {"expand": "body.storage,version,space"}
+                resp = session.get(path, params=params, timeout=10)
+                
+                api_tests[path] = {
+                    "status_code": resp.status_code,
+                    "success": resp.status_code < 400,
+                    "response_size": len(resp.text),
+                    "content_type": resp.headers.get("content-type", ""),
+                    "error": None if resp.status_code < 400 else resp.text[:200]
+                }
+                
+                # 如果成功，记录页面信息
+                if resp.status_code < 400:
+                    try:
+                        data = resp.json()
+                        api_tests[path]["page_title"] = data.get("title", "")
+                        api_tests[path]["page_type"] = data.get("type", "")
+                        api_tests[path]["space_key"] = data.get("space", {}).get("key", "")
+                    except:
+                        pass
+                        
+            except Exception as e:
+                api_tests[path] = {
+                    "status_code": 0,
+                    "success": False,
+                    "error": str(e)[:200]
+                }
+        
+        # 分析结果并给出建议
+        successful_apis = [path for path, result in api_tests.items() if result.get("success")]
+        
+        if successful_apis:
+            recommendations.append(f"✅ 发现可用的API路径: {successful_apis[0]}")
+            
+            # 确定正确的API版本
+            if "/rest/api/content/" in successful_apis[0]:
+                recommendations.append("🔧 建议设置 WIKI_API_VERSION=''（空字符串）")
+            elif "/rest/api/1/" in successful_apis[0]:
+                recommendations.append("🔧 建议设置 WIKI_API_VERSION='1'")
+            elif "/rest/tinymce/" in successful_apis[0]:
+                recommendations.append("🔧 系统主要使用TinyMCE API，REST API作为备用")
+                
+        else:
+            recommendations.append("❌ 所有API路径都失败了")
+            recommendations.append("🔍 请检查:")
+            recommendations.append("  - WIKI_BASE_URL是否正确")
+            recommendations.append("  - 页面ID是否存在")
+            recommendations.append("  - 用户权限是否足够")
+            recommendations.append("  - 网络连接是否正常")
+        
+        # 测试多种评论API
+        comment_test_urls = [
+            f"{base_url}/rest/tinymce/1/content/{input.pageId}/comment",
+            f"{base_url}/rest/tinymce/1.0/content/{input.pageId}/comment", 
+            f"{base_url}/rest/api/content/{input.pageId}/child/comment",
+            f"{base_url}/rest/api/1.0/content/{input.pageId}/child/comment",
+        ]
+        
+        if context_path:
+            comment_test_urls.extend([
+                f"{base_url}/{context_path}/rest/tinymce/1/content/{input.pageId}/comment",
+                f"{base_url}/{context_path}/rest/tinymce/1.0/content/{input.pageId}/comment",
+                f"{base_url}/{context_path}/rest/api/content/{input.pageId}/child/comment",
+                f"{base_url}/{context_path}/rest/api/1.0/content/{input.pageId}/child/comment",
+            ])
+        
+        # 测试每个评论API
+        working_comment_apis = []
+        for comment_url in comment_test_urls:
+            try:
+                resp = session.get(comment_url, timeout=10)
+                api_tests[f"comment_api_{len(api_tests)}"] = {
+                    "url": comment_url,
+                    "status_code": resp.status_code,
+                    "success": resp.status_code < 400,
+                    "note": "评论API测试"
+                }
+                
+                if resp.status_code < 400:
+                    working_comment_apis.append(comment_url)
+                elif resp.status_code == 501:
+                    api_tests[f"comment_api_{len(api_tests)-1}"]["note"] += " (501 Not Implemented)"
+                    
+            except Exception as e:
+                api_tests[f"comment_api_{len(api_tests)}"] = {
+                    "url": comment_url,
+                    "error": str(e)[:200],
+                    "success": False,
+                    "note": "评论API测试异常"
+                }
+        
+        # 评论API建议
+        if working_comment_apis:
+            recommendations.append(f"✅ 找到可用的评论API: {working_comment_apis[0]}")
+        else:
+            recommendations.append("❌ 所有评论API都返回501错误")
+            recommendations.append("💡 可能的解决方案:")
+            recommendations.append("  - 检查用户是否有评论权限")
+            recommendations.append("  - 确认页面是否允许评论")
+            recommendations.append("  - 尝试不同的API版本或端点")
+            recommendations.append("  - 联系管理员检查服务器配置")
+        
+        return WikiDiagnosticOutput(
+            pageId=input.pageId,
+            apiTests=api_tests,
+            recommendations=recommendations,
+            hint=f"测试了{len(test_paths)}个API路径，找到{len(successful_apis)}个可用路径"
+        )
+        
+    except Exception as e:
+        return WikiDiagnosticOutput(
+            pageId=input.pageId,
+            apiTests={},
+            recommendations=[f"诊断过程出错: {str(e)}"],
+            hint=f"Wiki诊断失败: {str(e)}"
+        )
 
 if __name__ == "__main__":
     # 以 stdio 方式启动 MCP（FastMCP 会处理协议细节）

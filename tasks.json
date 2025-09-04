@@ -1,0 +1,397 @@
+{
+  "tasks": [
+    {
+      "id": "359ee698-7cf6-4e31-9027-f07c8a332ea7",
+      "name": "配置测试基础框架和工具类",
+      "description": "为整个项目创建统一的测试基础架构，包括BaseTest基类、测试配置类、Mock工具类和测试数据构建器。确保所有模块都能复用统一的测试配置和工具",
+      "notes": "这是基础任务，为后续所有测试提供工具支持。需要考虑SessionContext、RedissonClient等关键组件的Mock策略",
+      "status": "pending",
+      "dependencies": [],
+      "createdAt": "2025-09-03T06:28:20.182Z",
+      "updatedAt": "2025-09-03T06:28:20.182Z",
+      "relatedFiles": [
+        {
+          "path": "pom.xml",
+          "type": "TO_MODIFY",
+          "description": "添加JaCoCo插件配置",
+          "lineStart": 90,
+          "lineEnd": 110
+        },
+        {
+          "path": "im-common/src/test/java/com/bx/imcommon/BaseTest.java",
+          "type": "CREATE",
+          "description": "测试基类"
+        },
+        {
+          "path": "im-common/src/test/java/com/bx/imcommon/TestDataBuilder.java",
+          "type": "CREATE",
+          "description": "测试数据构建器"
+        },
+        {
+          "path": "im-common/src/test/java/com/bx/imcommon/MockUtil.java",
+          "type": "CREATE",
+          "description": "Mock工具类"
+        }
+      ],
+      "implementationGuide": "1. 在im-common/src/test创建BaseTest抽象类，配置通用Mock组件（RedissonClient、SessionContext等）\\n2. 创建TestDataBuilder工具类，提供各种实体和DTO的测试数据构造方法\\n3. 创建MockUtil工具类，封装常用的Mock操作\\n4. 配置统一的测试profile和属性文件\\n5. 添加JaCoCo代码覆盖率插件配置到父POM",
+      "verificationCriteria": "1. BaseTest类能正确初始化Spring测试环境\\n2. 所有Mock组件配置正确且可复用\\n3. TestDataBuilder能构造完整的测试数据\\n4. JaCoCo插件能生成覆盖率报告\\n5. 测试配置在所有模块中可用",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "453f65c0-f3c6-498c-9b7c-c343669135af",
+      "name": "im-common模块单元测试",
+      "description": "为im-common模块的所有工具类、枚举、模型类编写完整的单元测试，包括JwtUtil、CommaTextUtils、MessageUtils等核心工具类，以及各种枚举和模型类的测试",
+      "notes": "JwtUtil测试需要考虑加密算法的正确性，SessionContext需要测试线程局部变量的正确性",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "359ee698-7cf6-4e31-9027-f07c8a332ea7"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.182Z",
+      "updatedAt": "2025-09-03T06:28:20.182Z",
+      "relatedFiles": [
+        {
+          "path": "im-common/src/main/java/com/bx/imcommon/util/JwtUtil.java",
+          "type": "REFERENCE",
+          "description": "JWT工具类",
+          "lineStart": 1,
+          "lineEnd": 89
+        },
+        {
+          "path": "im-common/src/test/java/com/bx/imcommon/util/JwtUtilTest.java",
+          "type": "CREATE",
+          "description": "JWT工具类测试"
+        },
+        {
+          "path": "im-common/src/test/java/com/bx/imcommon/util/CommaTextUtilsTest.java",
+          "type": "CREATE",
+          "description": "逗号文本工具测试"
+        },
+        {
+          "path": "im-common/src/test/java/com/bx/imcommon/session/SessionContextTest.java",
+          "type": "CREATE",
+          "description": "会话上下文测试"
+        }
+      ],
+      "implementationGuide": "1. 为JwtUtil编写测试：token生成、解析、验证、异常场景\\n2. 为CommaTextUtils编写测试：字符串拆分组合、空值处理\\n3. 为MessageUtils编写测试：消息格式化、编解码\\n4. 为所有枚举类编写测试：值转换、业务规则验证\\n5. 为模型类编写测试：序列化反序列化、字段映射\\n6. 为SessionContext编写测试：会话管理、线程安全",
+      "verificationCriteria": "1. JwtUtil所有方法100%覆盖，包括异常场景\\n2. 所有枚举类的值转换和业务规则验证通过\\n3. 模型类的序列化反序列化正确\\n4. 工具类的边界条件和异常处理完整测试\\n5. 测试覆盖率达到100%",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "66023ead-553b-4d11-b1da-ecfe22829cdb",
+      "name": "im-client模块单元测试",
+      "description": "为im-client模块编写完整的单元测试，包括IMClient客户端、MessageListener监听器、消息发送器等组件的功能测试和集成测试",
+      "notes": "需要Mock网络通信和消息队列组件，确保测试的独立性和稳定性",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "453f65c0-f3c6-498c-9b7c-c343669135af"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.182Z",
+      "updatedAt": "2025-09-03T06:28:20.182Z",
+      "relatedFiles": [
+        {
+          "path": "im-client/src/main/java/com/bx/imclient/IMClient.java",
+          "type": "REFERENCE",
+          "description": "IM客户端主类"
+        },
+        {
+          "path": "im-client/src/test/java/com/bx/imclient/IMClientTest.java",
+          "type": "CREATE",
+          "description": "IM客户端测试"
+        },
+        {
+          "path": "im-client/src/test/java/com/bx/imclient/listener/MessageListenerTest.java",
+          "type": "CREATE",
+          "description": "消息监听器测试"
+        },
+        {
+          "path": "im-client/src/test/java/com/bx/imclient/IMAutoConfigurationTest.java",
+          "type": "CREATE",
+          "description": "自动配置测试"
+        }
+      ],
+      "implementationGuide": "1. 为IMClient编写测试：初始化配置、连接管理、消息发送接收\\n2. 为MessageListener编写测试：消息监听、处理逻辑、异常恢复\\n3. 为IMSender编写测试：不同类型消息发送、发送结果处理\\n4. 为注解处理器编写测试：@IMListener注解解析和处理\\n5. 为自动配置类编写测试：Bean初始化、配置项解析\\n6. 集成测试：完整的消息发送接收流程",
+      "verificationCriteria": "1. IMClient的连接管理和消息收发功能正确\\n2. MessageListener的消息处理逻辑完整测试\\n3. 自动配置类能正确初始化所有Bean\\n4. 异常场景的处理和恢复机制验证\\n5. 集成测试覆盖完整业务流程",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "610c94d1-0fd4-45da-8e52-1098b3e127cc",
+      "name": "im-server模块单元测试",
+      "description": "为im-server模块编写单元测试，重点测试WebSocket和TCP服务器的网络处理逻辑、消息处理器、编解码器等核心组件",
+      "notes": "网络组件测试需要使用EmbeddedChannel等Netty测试工具，确保测试的准确性和可靠性",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "453f65c0-f3c6-498c-9b7c-c343669135af"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.182Z",
+      "updatedAt": "2025-09-03T06:28:20.182Z",
+      "relatedFiles": [
+        {
+          "path": "im-server/src/main/java/com/bx/imserver/netty/ws/WebSocketServer.java",
+          "type": "REFERENCE",
+          "description": "WebSocket服务器"
+        },
+        {
+          "path": "im-server/src/test/java/com/bx/imserver/netty/ws/WebSocketServerTest.java",
+          "type": "CREATE",
+          "description": "WebSocket服务器测试"
+        },
+        {
+          "path": "im-server/src/test/java/com/bx/imserver/netty/processor/MessageProcessorTest.java",
+          "type": "CREATE",
+          "description": "消息处理器测试"
+        },
+        {
+          "path": "im-server/src/test/java/com/bx/imserver/netty/UserChannelCtxMapTest.java",
+          "type": "CREATE",
+          "description": "用户连接管理测试"
+        }
+      ],
+      "implementationGuide": "1. 为WebSocketServer编写测试：连接建立、消息处理、连接关闭\\n2. 为TcpSocketServer编写测试：TCP连接管理、数据传输\\n3. 为各种MessageProcessor编写测试：不同消息类型的处理逻辑\\n4. 为编解码器编写测试：消息协议的编码解码正确性\\n5. 为用户连接管理编写测试：UserChannelCtxMap的并发安全性\\n6. 为心跳处理编写测试：心跳检测和超时处理",
+      "verificationCriteria": "1. WebSocket和TCP服务器能正确处理连接和消息\\n2. 所有消息处理器的业务逻辑正确\\n3. 编解码器的协议处理准确\\n4. 用户连接管理的并发安全性验证\\n5. 网络异常和断线重连的处理正确",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "d857ce90-2467-4564-9cc3-b9645106696d",
+      "name": "im-platform实体类和转换器测试",
+      "description": "为im-platform模块的所有Entity实体类和MapStruct转换器编写测试，验证数据库映射、字段约束、业务规则和对象转换的正确性",
+      "notes": "需要重点测试MyBatis Plus的注解配置和数据库字段映射的正确性",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "359ee698-7cf6-4e31-9027-f07c8a332ea7"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.183Z",
+      "updatedAt": "2025-09-03T06:28:20.183Z",
+      "relatedFiles": [
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/entity/Group.java",
+          "type": "REFERENCE",
+          "description": "群组实体类",
+          "lineStart": 1,
+          "lineEnd": 71
+        },
+        {
+          "path": "im-platform/src/test/java/com/bx/implatform/entity/GroupTest.java",
+          "type": "CREATE",
+          "description": "群组实体测试"
+        },
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/converter/GroupConverter.java",
+          "type": "REFERENCE",
+          "description": "群组转换器"
+        },
+        {
+          "path": "im-platform/src/test/java/com/bx/implatform/converter/GroupConverterTest.java",
+          "type": "CREATE",
+          "description": "群组转换器测试"
+        }
+      ],
+      "implementationGuide": "1. 为所有Entity类编写测试：字段映射、约束验证、序列化\\n2. 为MapStruct转换器编写测试：DTO与Entity互转、字段映射准确性\\n3. 为枚举转换器编写测试：枚举与数据库值的转换\\n4. 为自定义TypeHandler编写测试：复杂类型的数据库存储\\n5. 验证实体类的equals、hashCode、toString方法\\n6. 测试Lombok生成的方法是否符合预期",
+      "verificationCriteria": "1. 所有Entity类的字段映射和约束验证正确\\n2. MapStruct转换器的对象转换准确无误\\n3. 枚举和自定义类型的数据库存储转换正确\\n4. Lombok生成的方法符合业务预期\\n5. 实体类的业务规则验证完整",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "44f8b5b8-ac7d-40c1-a5df-6d93f31f98f4",
+      "name": "im-platform Repository和Mapper测试",
+      "description": "为im-platform模块的所有Repository和Mapper接口编写数据访问层测试，使用@DataJpaTest和内存数据库验证SQL查询的正确性",
+      "notes": "使用@Sql注解准备测试数据，确保测试数据的一致性和隔离性",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "d857ce90-2467-4564-9cc3-b9645106696d"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.183Z",
+      "updatedAt": "2025-09-03T06:28:20.183Z",
+      "relatedFiles": [
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/mapper/GroupMapper.java",
+          "type": "REFERENCE",
+          "description": "群组数据访问接口"
+        },
+        {
+          "path": "im-platform/src/test/java/com/bx/implatform/mapper/GroupMapperTest.java",
+          "type": "CREATE",
+          "description": "群组Mapper测试"
+        },
+        {
+          "path": "im-platform/src/test/resources/sql/test-data.sql",
+          "type": "CREATE",
+          "description": "测试数据SQL脚本"
+        },
+        {
+          "path": "im-platform/src/test/resources/application-test.yml",
+          "type": "CREATE",
+          "description": "测试环境配置"
+        }
+      ],
+      "implementationGuide": "1. 配置H2内存数据库用于Repository测试\\n2. 为每个Mapper编写测试：CRUD操作、复杂查询、分页排序\\n3. 为自定义SQL查询编写测试：验证查询结果和性能\\n4. 为批量操作编写测试：批量插入、更新、删除\\n5. 为事务操作编写测试：事务回滚、提交验证\\n6. 测试数据库约束和外键关系",
+      "verificationCriteria": "1. 所有Repository方法的数据库操作正确\\n2. 复杂查询的结果准确，性能满足要求\\n3. 批量操作的数据一致性验证\\n4. 事务处理的正确性和异常回滚\\n5. 数据库约束和业务规则验证",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "243eb7c5-f92d-44b4-ab3d-d7e5044934d1",
+      "name": "im-platform核心Service层测试",
+      "description": "为im-platform模块的核心Service类编写详细的业务逻辑测试，包括GroupServiceImpl、UserServiceImpl等关键业务服务的完整测试覆盖",
+      "notes": "Service层测试是核心，需要Mock SessionContext提供用户会话信息，重点测试复杂业务逻辑和异常场景",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "44f8b5b8-ac7d-40c1-a5df-6d93f31f98f4"
+        },
+        {
+          "taskId": "453f65c0-f3c6-498c-9b7c-c343669135af"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.183Z",
+      "updatedAt": "2025-09-03T06:28:20.183Z",
+      "relatedFiles": [
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/service/impl/GroupServiceImpl.java",
+          "type": "REFERENCE",
+          "description": "群组服务实现",
+          "lineStart": 1,
+          "lineEnd": 1014
+        },
+        {
+          "path": "im-platform/src/test/java/com/bx/implatform/service/impl/GroupServiceImplTest.java",
+          "type": "CREATE",
+          "description": "群组服务测试"
+        },
+        {
+          "path": "im-platform/src/test/java/com/bx/implatform/service/impl/UserServiceImplTest.java",
+          "type": "CREATE",
+          "description": "用户服务测试"
+        }
+      ],
+      "implementationGuide": "1. 为GroupServiceImpl编写测试：群聊创建、修改、解散、成员管理等所有业务方法\\n2. 为UserServiceImpl编写测试：用户管理、权限验证、状态更新\\n3. 为消息相关Service编写测试：消息发送、接收、存储、查询\\n4. Mock所有外部依赖：Repository、Redis、Kafka、IMClient等\\n5. 测试事务管理：事务提交、回滚、异常处理\\n6. 测试缓存逻辑：缓存命中、失效、更新策略\\n7. 测试并发安全：分布式锁、并发操作",
+      "verificationCriteria": "1. 所有Service方法的业务逻辑正确性验证\\n2. 异常场景的处理和错误码返回正确\\n3. 缓存策略的正确性和一致性验证\\n4. 事务管理和并发控制的安全性验证\\n5. 外部依赖Mock的准确性和完整性",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "89562330-a6e6-4b27-b6d0-643780ab1029",
+      "name": "im-platform Controller层集成测试",
+      "description": "为im-platform模块的所有Controller编写Web层集成测试，使用@WebMvcTest测试REST API的请求处理、参数验证、权限控制和响应格式",
+      "notes": "Controller测试需要Mock用户认证和权限，使用MockMvc进行HTTP请求模拟",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "243eb7c5-f92d-44b4-ab3d-d7e5044934d1"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.183Z",
+      "updatedAt": "2025-09-03T06:28:20.183Z",
+      "relatedFiles": [
+        {
+          "path": "im-platform/src/main/java/com/bx/implatform/controller/app/GroupController.java",
+          "type": "REFERENCE",
+          "description": "群组控制器",
+          "lineStart": 1,
+          "lineEnd": 145
+        },
+        {
+          "path": "im-platform/src/test/java/com/bx/implatform/controller/app/GroupControllerTest.java",
+          "type": "CREATE",
+          "description": "群组控制器测试"
+        },
+        {
+          "path": "im-platform/src/test/java/com/bx/implatform/controller/BaseControllerTest.java",
+          "type": "CREATE",
+          "description": "控制器测试基类"
+        }
+      ],
+      "implementationGuide": "1. 为所有Controller编写@WebMvcTest：请求映射、参数绑定、响应格式\\n2. 测试参数验证：@Valid注解、自定义校验器、错误消息\\n3. 测试权限控制：认证拦截、授权验证、权限异常\\n4. 测试异常处理：GlobalExceptionHandler的统一异常处理\\n5. 测试分页和排序：分页参数、排序规则、结果验证\\n6. 测试文件上传下载：多媒体文件处理\\n7. Mock所有Service层依赖",
+      "verificationCriteria": "1. 所有API端点的请求处理正确\\n2. 参数验证和错误处理完整\\n3. 权限控制和认证拦截有效\\n4. 响应格式和状态码符合规范\\n5. 异常处理的统一性和准确性",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "9c17eaf7-48c9-42a1-8362-0f71d260e415",
+      "name": "im-ai模块测试完善",
+      "description": "完善im-ai模块的单元测试覆盖率，去除@Disabled标记，为AI Agent配置、Dify客户端集成、AI消息处理等组件添加完整测试",
+      "notes": "AI模块测试需要Mock外部AI服务，避免依赖真实的AI API，确保测试稳定性",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "243eb7c5-f92d-44b4-ab3d-d7e5044934d1"
+        },
+        {
+          "taskId": "453f65c0-f3c6-498c-9b7c-c343669135af"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.183Z",
+      "updatedAt": "2025-09-03T06:28:20.183Z",
+      "relatedFiles": [
+        {
+          "path": "im-ai/src/test/java/com/bx/imai/config/AIAgentConfigTypeHandlerTest.java",
+          "type": "TO_MODIFY",
+          "description": "AI Agent配置测试类，完善测试用例",
+          "lineStart": 1,
+          "lineEnd": 71
+        },
+        {
+          "path": "im-ai/src/test/java/com/bx/imai/config/DifyChatClientTest.java",
+          "type": "TO_MODIFY",
+          "description": "Dify客户端测试，去除@Disabled"
+        },
+        {
+          "path": "im-ai/src/test/java/com/bx/imai/service/AIAgentServiceTest.java",
+          "type": "CREATE",
+          "description": "AI Agent服务测试"
+        }
+      ],
+      "implementationGuide": "1. 修复现有测试类：去除@Disabled标记，完善测试用例\\n2. 为AI Agent配置管理编写测试：配置解析、类型转换、验证规则\\n3. 为AI消息处理编写测试：消息路由、AI回复生成、异常处理\\n4. Mock外部AI服务：Dify API调用、LangChain4j集成\\n5. 为AI Agent管理编写测试：Agent创建、更新、删除、查询\\n6. 集成测试：完整的AI对话流程测试",
+      "verificationCriteria": "1. 所有现有测试类正常运行且通过\\n2. AI配置解析和类型转换正确\\n3. AI消息处理流程完整测试\\n4. 外部AI服务Mock准确可靠\\n5. AI功能的异常处理和恢复机制验证",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    },
+    {
+      "id": "b6a3a2f1-865b-49ae-a03c-4a8774e7efa8",
+      "name": "集成测试和覆盖率验证",
+      "description": "运行所有单元测试，生成完整的代码覆盖率报告，修复测试失败问题，确保100%的测试通过率和覆盖率目标达成",
+      "notes": "这是最终验收任务，需要确保所有测试都能稳定通过，覆盖率达到100%",
+      "status": "pending",
+      "dependencies": [
+        {
+          "taskId": "89562330-a6e6-4b27-b6d0-643780ab1029"
+        },
+        {
+          "taskId": "9c17eaf7-48c9-42a1-8362-0f71d260e415"
+        },
+        {
+          "taskId": "66023ead-553b-4d11-b1da-ecfe22829cdb"
+        },
+        {
+          "taskId": "610c94d1-0fd4-45da-8e52-1098b3e127cc"
+        }
+      ],
+      "createdAt": "2025-09-03T06:28:20.183Z",
+      "updatedAt": "2025-09-03T06:28:20.183Z",
+      "relatedFiles": [
+        {
+          "path": "pom.xml",
+          "type": "TO_MODIFY",
+          "description": "配置测试执行和覆盖率插件"
+        },
+        {
+          "path": "target/site/jacoco/index.html",
+          "type": "OTHER",
+          "description": "JaCoCo覆盖率报告"
+        },
+        {
+          "path": "TEST-REPORT.md",
+          "type": "CREATE",
+          "description": "最终测试报告文档"
+        }
+      ],
+      "implementationGuide": "1. 配置Maven Surefire插件并行执行测试\\n2. 运行完整的测试套件：mvn clean test\\n3. 生成JaCoCo覆盖率报告：mvn jacoco:report\\n4. 分析覆盖率报告，识别未覆盖代码\\n5. 补充遗漏的测试用例\\n6. 修复测试失败和不稳定问题\\n7. 优化测试执行时间和资源消耗\\n8. 生成最终测试报告和文档",
+      "verificationCriteria": "1. 所有单元测试100%通过\\n2. 代码覆盖率达到100%\\n3. 测试执行时间在可接受范围内\\n4. 测试报告详细且准确\\n5. 没有测试失败或不稳定的用例",
+      "analysisResult": "为基于Spring Boot 3的即时通讯平台项目添加全面的单元测试，确保100%测试覆盖率和通过率。项目包含im-platform（核心）、im-ai（AI集成）、im-common（工具类）、im-client（SDK）、im-server（服务器）五个模块，使用JUnit 5 + Mockito + Spring Test框架，遵循现有代码风格和架构模式"
+    }
+  ]
+}

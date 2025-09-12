@@ -2731,6 +2731,43 @@ class WikiDiagnosticOutput(BaseModel):
     hint: str
 
 
+class PRDReviewInput(BaseModel):
+    """🔍 PRD需求评审工具的输入参数
+    
+    用于配置PRD文档评审的各项参数，支持从Wiki获取文档并进行专业评审。
+    """
+    model_config = ConfigDict(title="PRDReviewInput", description="PRD需求评审工具的输入参数")
+    wikiUrl: str = Field(..., description="📄 Wiki中PRD文档的完整URL地址，支持Confluence等Wiki系统")
+    reviewerName: str = Field(..., description="👤 评审人姓名，将记录在评审报告中")
+    projectRoot: Optional[str] = Field(None, description="📁 项目根目录路径，用于保存评审报告（可选，默认使用当前目录）")
+
+
+class PRDReviewCriteria(BaseModel):
+    """PRD评审标准"""
+    name: str = Field(..., description="评审标准名称")
+    description: str = Field(..., description="评审标准描述")
+    passed: bool = Field(..., description="是否通过")
+    score: int = Field(..., description="评分（0-100）")
+    comments: List[str] = Field(default_factory=list, description="评审意见")
+    suggestions: List[str] = Field(default_factory=list, description="改进建议")
+
+
+class PRDReviewOutput(BaseModel):
+    """📊 PRD需求评审结果输出
+    
+    包含完整的评审结果、评分、建议和报告路径等信息。
+    """
+    wikiUrl: str = Field(..., description="📄 被评审的Wiki文档URL")
+    reviewerName: str = Field(..., description="👤 评审人姓名")
+    reviewDate: str = Field(..., description="📅 评审完成时间")
+    overallScore: int = Field(..., description="📈 总体评分（0-100分），80分以上为优秀")
+    overallStatus: Literal["APPROVED", "NEEDS_REVISION", "REJECTED"] = Field(..., description="✅ 总体评审状态：通过/需修订/拒绝")
+    criteria: List[PRDReviewCriteria] = Field(..., description="📋 5大评审标准的详细评分和意见")
+    summary: str = Field(..., description="📝 评审总结和整体评价")
+    nextSteps: List[str] = Field(default_factory=list, description="🎯 后续行动项和改进建议")
+    reportPath: Optional[str] = Field(None, description="📄 生成的详细评审报告文件路径")
+
+
 @app.tool()
 def wiki_create_page(input: WikiCreatePageInput) -> WikiCreatePageOutput:
     """在 Wiki (Confluence) 中创建新页面。"""
@@ -4741,6 +4778,555 @@ def wiki_diagnostic(input: WikiDiagnosticInput) -> WikiDiagnosticOutput:
             recommendations=[f"诊断过程出错: {str(e)}"],
             hint=f"Wiki诊断失败: {str(e)}"
         )
+
+
+@app.tool()
+def prd_review(input: PRDReviewInput) -> PRDReviewOutput:
+    """🔍 PRD需求评审工具 - 专业的产品需求文档质量评估和审核工具
+    
+    📋 **主要功能**：
+    - 自动从Wiki获取PRD文档内容和附件
+    - 基于6大专业标准进行全面质量评估
+    - 生成详细评审报告和改进建议
+    - 提供可开发性评估和风险识别
+    
+    🎯 **适用场景**：
+    - 产品需求文档评审和质量检查
+    - 开发前的需求完整性验证
+    - PRD文档标准化审核
+    - 需求可开发性评估
+    - 项目启动前的需求质量把关
+    
+    📊 **评审标准**（5大维度）：
+    1. 🎯 **明确业务背景** - 需求来源、目的与用户价值场景完整性
+    2. 🎨 **附加原型或示意图** - 界面/流程变更的可视化支撑材料
+    3. ⚙️ **拆解为开发可执行单元** - 技术实现细节的具体化程度
+    4. 📝 **验收标准（AC）** - 可测试验收条件的数量和质量
+    5. 🚀 **可开发状态评估** - 技术风险、依赖关系和实施可行性
+    
+    📈 **评分机制**：
+    - 每个标准0-100分量化评分
+    - 总体状态：APPROVED(≥80分) / NEEDS_REVISION(60-79分) / REJECTED(<60分)
+    - 自动生成改进建议和后续行动计划
+    
+    📄 **输出内容**：
+    - 详细评审报告（Markdown格式）
+    - 各维度评分和通过状态
+    - 具体改进建议和修订指导
+    - 后续开发建议和风险提示
+    
+    🔧 **使用提示**：
+    当用户需要评审PRD、检查需求文档质量、验证开发准备度时，请主动调用此工具。
+    支持任何可访问的Wiki URL，会自动处理文档解析和附件分析。
+    """
+    try:
+        project_root = _resolve_project_root(input.projectRoot)
+        review_date = _timestamp()
+        
+        # 1. 从Wiki获取PRD文档内容
+        wiki_result = wiki_read_url(WikiReadUrlInput(
+            url=input.wikiUrl,
+            includeAttachments=True,
+            includeComments=True
+        ))
+        
+        # 检查是否成功获取到内容（通过pageId和content判断）
+        if not wiki_result.pageId or not wiki_result.content:
+            return PRDReviewOutput(
+                wikiUrl=input.wikiUrl,
+                reviewerName=input.reviewerName,
+                reviewDate=review_date,
+                overallScore=0,
+                overallStatus="REJECTED",
+                criteria=[],
+                summary=f"无法获取Wiki文档内容: {wiki_result.hint}",
+                nextSteps=["修复Wiki访问问题后重新评审"]
+            )
+        
+        prd_content = wiki_result.content
+        prd_title = wiki_result.title
+        
+        # 2. 执行各项评审标准检查
+        criteria_results = []
+        
+        # 标准1: 明确业务背景
+        background_criteria = _evaluate_business_background_criteria(prd_content, prd_title)
+        criteria_results.append(background_criteria)
+        
+        # 标准2: 附加原型或示意图
+        prototype_criteria = _evaluate_prototype_criteria(prd_content, wiki_result.attachments)
+        criteria_results.append(prototype_criteria)
+        
+        # 标准3: 拆解为开发可执行单元
+        breakdown_criteria = _evaluate_breakdown_criteria(prd_content)
+        criteria_results.append(breakdown_criteria)
+        
+        # 标准4: 验收标准（AC）
+        acceptance_criteria = _evaluate_acceptance_criteria(prd_content)
+        criteria_results.append(acceptance_criteria)
+        
+        # 标准5: 可开发状态评估
+        development_criteria = _evaluate_development_readiness_criteria(prd_content)
+        criteria_results.append(development_criteria)
+        
+        # 3. 计算总体评分和状态
+        total_score = sum(c.score for c in criteria_results) // len(criteria_results)
+        passed_count = sum(1 for c in criteria_results if c.passed)
+        
+        if total_score >= 80 and passed_count >= 4:
+            overall_status = "APPROVED"
+        elif total_score >= 60 and passed_count >= 3:
+            overall_status = "NEEDS_REVISION"
+        else:
+            overall_status = "REJECTED"
+        
+        # 4. 生成评审总结和后续行动项
+        summary = _generate_review_summary(criteria_results, total_score, overall_status)
+        next_steps = _generate_next_steps(criteria_results, overall_status)
+        
+        # 5. 生成评审报告文件
+        report_path = _generate_review_report(
+            project_root, input, wiki_result, criteria_results, 
+            total_score, overall_status, summary, next_steps, review_date
+        )
+        
+        return PRDReviewOutput(
+            wikiUrl=input.wikiUrl,
+            reviewerName=input.reviewerName,
+            reviewDate=review_date,
+            overallScore=total_score,
+            overallStatus=overall_status,
+            criteria=criteria_results,
+            summary=summary,
+            nextSteps=next_steps,
+            reportPath=report_path
+        )
+        
+    except Exception as e:
+        return PRDReviewOutput(
+            wikiUrl=input.wikiUrl,
+            reviewerName=input.reviewerName,
+            reviewDate=_timestamp(),
+            overallScore=0,
+            overallStatus="REJECTED",
+            criteria=[],
+            summary=f"PRD评审过程出错: {str(e)}",
+            nextSteps=["修复技术问题后重新评审"]
+        )
+
+
+def _evaluate_business_background_criteria(prd_content: str, prd_title: str) -> PRDReviewCriteria:
+    """评估业务背景标准"""
+    comments = []
+    suggestions = []
+    score = 0
+    
+    # 检查背景相关关键词
+    background_keywords = ["背景", "目的", "价值", "用户", "场景", "需求来源", "业务目标", "问题", "现状"]
+    found_keywords = [kw for kw in background_keywords if kw in prd_content]
+    
+    if found_keywords:
+        comments.append(f"包含背景相关内容: {', '.join(found_keywords)}")
+        score += min(len(found_keywords) * 10, 40)
+    else:
+        suggestions.append("添加明确的业务背景说明")
+    
+    # 检查用户视角描述
+    user_keywords = ["用户", "客户", "使用者", "角色", "persona", "用户故事"]
+    found_user_keywords = [kw for kw in user_keywords if kw in prd_content]
+    
+    if found_user_keywords:
+        comments.append(f"包含用户视角描述: {', '.join(found_user_keywords)}")
+        score += 30
+    else:
+        suggestions.append("添加用户视角和价值场景描述")
+    
+    # 检查目标和价值描述
+    value_keywords = ["目标", "收益", "效果", "提升", "优化", "解决", "改善"]
+    found_value_keywords = [kw for kw in value_keywords if kw in prd_content]
+    
+    if found_value_keywords:
+        comments.append(f"包含目标价值描述: {', '.join(found_value_keywords)}")
+        score += 30
+    else:
+        suggestions.append("明确说明预期目标和业务价值")
+    
+    return PRDReviewCriteria(
+        name="明确业务背景",
+        description="说明来源、目的与用户视角的价值场景",
+        passed=score >= 70,
+        score=score,
+        comments=comments,
+        suggestions=suggestions
+    )
+
+
+def _evaluate_prototype_criteria(prd_content: str, attachments: List[Dict]) -> PRDReviewCriteria:
+    """评估原型或示意图标准"""
+    comments = []
+    suggestions = []
+    score = 0
+    
+    # 检查是否有附件
+    if attachments:
+        image_attachments = [att for att in attachments if any(ext in att.get('name', '').lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf'])]
+        if image_attachments:
+            comments.append(f"包含{len(image_attachments)}个图像附件")
+            score += 50
+        else:
+            comments.append(f"有{len(attachments)}个附件，但无图像文件")
+            score += 20
+    
+    # 检查内容中的图像引用
+    image_keywords = ["图", "原型", "设计稿", "流程图", "示意图", "截图", "mockup", "wireframe", "prototype"]
+    found_image_keywords = [kw for kw in image_keywords if kw in prd_content]
+    
+    if found_image_keywords:
+        comments.append(f"文档中提及图像相关内容: {', '.join(found_image_keywords)}")
+        score += 30
+    
+    # 检查界面/流程变更描述
+    ui_keywords = ["界面", "页面", "流程", "交互", "操作", "步骤", "UI", "UX"]
+    found_ui_keywords = [kw for kw in ui_keywords if kw in prd_content]
+    
+    if found_ui_keywords:
+        comments.append(f"包含界面/流程相关描述: {', '.join(found_ui_keywords)}")
+        score += 20
+        
+        if not attachments and not found_image_keywords:
+            suggestions.append("界面/流程变更需要附加设计稿或流程图")
+    
+    if score < 50:
+        suggestions.append("如有界面或流程变更，请附加相关设计稿、原型或流程图")
+    
+    return PRDReviewCriteria(
+        name="附加原型或示意图",
+        description="如有界面/流程变更，需附设计稿/流程图",
+        passed=score >= 50,
+        score=score,
+        comments=comments,
+        suggestions=suggestions
+    )
+
+
+def _evaluate_breakdown_criteria(prd_content: str) -> PRDReviewCriteria:
+    """评估开发可执行单元拆解标准"""
+    comments = []
+    suggestions = []
+    score = 0
+    
+    # 检查技术实现相关内容
+    tech_keywords = ["字段", "接口", "API", "数据库", "表", "参数", "返回值", "规则", "逻辑", "算法"]
+    found_tech_keywords = [kw for kw in tech_keywords if kw in prd_content]
+    
+    if found_tech_keywords:
+        comments.append(f"包含技术实现要素: {', '.join(found_tech_keywords)}")
+        score += min(len(found_tech_keywords) * 8, 40)
+    else:
+        suggestions.append("添加具体的技术实现要素（字段、接口、规则等）")
+    
+    # 检查流程描述
+    process_keywords = ["流程", "步骤", "过程", "阶段", "环节", "操作"]
+    found_process_keywords = [kw for kw in process_keywords if kw in prd_content]
+    
+    if found_process_keywords:
+        comments.append(f"包含流程描述: {', '.join(found_process_keywords)}")
+        score += 25
+    else:
+        suggestions.append("详细描述业务流程和操作步骤")
+    
+    # 检查数据结构描述
+    data_keywords = ["数据", "结构", "模型", "实体", "属性", "关系"]
+    found_data_keywords = [kw for kw in data_keywords if kw in prd_content]
+    
+    if found_data_keywords:
+        comments.append(f"包含数据结构描述: {', '.join(found_data_keywords)}")
+        score += 25
+    else:
+        suggestions.append("明确数据结构和实体关系")
+    
+    # 检查是否有具体的实现细节
+    detail_indicators = ["具体", "详细", "明确", "清晰", "完整"]
+    if any(indicator in prd_content for indicator in detail_indicators):
+        comments.append("包含实现细节描述")
+        score += 10
+    
+    return PRDReviewCriteria(
+        name="拆解为开发可执行单元",
+        description="包括字段、流程、接口、规则等，避免一票带过",
+        passed=score >= 70,
+        score=score,
+        comments=comments,
+        suggestions=suggestions
+    )
+
+
+def _evaluate_acceptance_criteria(prd_content: str) -> PRDReviewCriteria:
+    """评估验收标准（AC）"""
+    comments = []
+    suggestions = []
+    score = 0
+    
+    # 检查验收标准相关关键词
+    ac_keywords = ["验收", "标准", "AC", "acceptance", "criteria", "测试", "检验", "确认"]
+    found_ac_keywords = [kw for kw in ac_keywords if kw in prd_content]
+    
+    if found_ac_keywords:
+        comments.append(f"包含验收标准相关内容: {', '.join(found_ac_keywords)}")
+        score += 30
+    
+    # 检查列表格式的标准（寻找编号或项目符号）
+    import re
+    
+    # 寻找编号列表 (1. 2. 3. 或 1) 2) 3))
+    numbered_lists = re.findall(r'^\s*\d+[.)]\s+.+', prd_content, re.MULTILINE)
+    
+    # 寻找项目符号列表 (- * +)
+    bullet_lists = re.findall(r'^\s*[-*+]\s+.+', prd_content, re.MULTILINE)
+    
+    total_criteria = len(numbered_lists) + len(bullet_lists)
+    
+    if total_criteria >= 5:
+        comments.append(f"发现{total_criteria}条列表项，符合验收标准数量要求")
+        score += 50
+    elif total_criteria >= 3:
+        comments.append(f"发现{total_criteria}条列表项，基本满足验收标准要求")
+        score += 35
+    elif total_criteria >= 1:
+        comments.append(f"发现{total_criteria}条列表项，验收标准数量不足")
+        score += 20
+        suggestions.append("增加验收标准至3-5条")
+    else:
+        suggestions.append("添加至少3-5条明确的验收标准")
+    
+    # 检查测试相关内容
+    test_keywords = ["测试", "验证", "检查", "确保", "应该", "必须", "能够"]
+    found_test_keywords = [kw for kw in test_keywords if kw in prd_content]
+    
+    if found_test_keywords:
+        comments.append(f"包含测试验证相关描述: {', '.join(found_test_keywords[:3])}")
+        score += 20
+    else:
+        suggestions.append("添加可测试的验收标准描述")
+    
+    return PRDReviewCriteria(
+        name="有验收标准（AC）",
+        description="至少3-5条验收标准，供开发/QA参考测试",
+        passed=score >= 70,
+        score=score,
+        comments=comments,
+        suggestions=suggestions
+    )
+
+
+def _evaluate_development_readiness_criteria(prd_content: str) -> PRDReviewCriteria:
+    """评估可开发状态"""
+    comments = []
+    suggestions = []
+    score = 0
+    
+    # 检查技术风险相关内容
+    risk_keywords = ["风险", "依赖", "限制", "约束", "问题", "挑战", "难点"]
+    found_risk_keywords = [kw for kw in risk_keywords if kw in prd_content]
+    
+    if found_risk_keywords:
+        comments.append(f"已识别潜在风险: {', '.join(found_risk_keywords)}")
+        score += 25
+    else:
+        suggestions.append("评估并说明技术风险和依赖关系")
+    
+    # 检查技术可行性描述
+    feasibility_keywords = ["可行", "实现", "技术方案", "架构", "设计", "开发"]
+    found_feasibility_keywords = [kw for kw in feasibility_keywords if kw in prd_content]
+    
+    if found_feasibility_keywords:
+        comments.append(f"包含技术可行性描述: {', '.join(found_feasibility_keywords)}")
+        score += 25
+    else:
+        suggestions.append("添加技术可行性分析")
+    
+    # 检查逻辑一致性（寻找矛盾表述）
+    contradiction_indicators = ["但是", "然而", "相反", "不过", "除非"]
+    contradictions = [ind for ind in contradiction_indicators if ind in prd_content]
+    
+    if contradictions:
+        comments.append(f"发现可能的逻辑矛盾指示词: {', '.join(contradictions)}")
+        suggestions.append("检查并解决逻辑矛盾")
+        score -= 10
+    else:
+        comments.append("未发现明显逻辑矛盾")
+        score += 15
+    
+    # 检查完整性
+    completeness_keywords = ["完整", "全面", "详细", "清晰", "明确"]
+    found_completeness = [kw for kw in completeness_keywords if kw in prd_content]
+    
+    if found_completeness:
+        comments.append(f"包含完整性描述: {', '.join(found_completeness)}")
+        score += 20
+    
+    # 检查上下游依赖说明
+    dependency_keywords = ["上游", "下游", "依赖", "关联", "影响", "配合"]
+    found_dependency = [kw for kw in dependency_keywords if kw in prd_content]
+    
+    if found_dependency:
+        comments.append(f"包含依赖关系说明: {', '.join(found_dependency)}")
+        score += 15
+    else:
+        suggestions.append("明确上下游系统依赖关系")
+    
+    return PRDReviewCriteria(
+        name="评估为可开发状态",
+        description="技术上无重大风险/依赖/上下游未明问题，逻辑上无重大冲突",
+        passed=score >= 70,
+        score=max(0, score),
+        comments=comments,
+        suggestions=suggestions
+    )
+
+
+def _generate_review_summary(criteria: List[PRDReviewCriteria], total_score: int, status: str) -> str:
+    """生成评审总结"""
+    passed_count = sum(1 for c in criteria if c.passed)
+    total_count = len(criteria)
+    
+    summary = f"PRD需求评审完成，总体评分: {total_score}/100，状态: {status}\n\n"
+    summary += f"评审标准通过情况: {passed_count}/{total_count}\n\n"
+    
+    summary += "各项标准评分:\n"
+    for criterion in criteria:
+        status_icon = "✅" if criterion.passed else "❌"
+        summary += f"{status_icon} {criterion.name}: {criterion.score}/100\n"
+    
+    summary += f"\n整体评价:\n"
+    if status == "APPROVED":
+        summary += "✅ PRD质量良好，可以进入开发阶段"
+    elif status == "NEEDS_REVISION":
+        summary += "⚠️ PRD基本可用，但需要完善部分内容"
+    else:
+        summary += "❌ PRD质量不足，需要重大修订后重新评审"
+    
+    return summary
+
+
+def _generate_next_steps(criteria: List[PRDReviewCriteria], status: str) -> List[str]:
+    """生成后续行动项"""
+    next_steps = []
+    
+    # 收集所有建议
+    all_suggestions = []
+    for criterion in criteria:
+        if not criterion.passed:
+            all_suggestions.extend(criterion.suggestions)
+    
+    if status == "APPROVED":
+        next_steps.append("✅ 可以开始技术方案设计")
+        next_steps.append("✅ 可以进行开发任务拆分")
+        next_steps.append("✅ 可以开始开发工作")
+    elif status == "NEEDS_REVISION":
+        next_steps.append("📝 根据评审意见完善PRD内容")
+        next_steps.extend(all_suggestions[:3])  # 取前3个最重要的建议
+        next_steps.append("🔄 完善后重新提交评审")
+    else:
+        next_steps.append("❌ 需要重大修订PRD内容")
+        next_steps.extend(all_suggestions[:5])  # 取前5个最重要的建议
+        next_steps.append("🔄 修订完成后重新提交评审")
+    
+    return next_steps
+
+
+def _generate_review_report(project_root: Path, input_data: PRDReviewInput, wiki_result, 
+                          criteria: List[PRDReviewCriteria], total_score: int, 
+                          status: str, summary: str, next_steps: List[str], review_date: str) -> str:
+    """生成评审报告文件"""
+    try:
+        # 创建报告目录
+        reports_dir = project_root / "Docs" / "ReviewReports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 生成报告文件名
+        import re
+        safe_title = re.sub(r'[^\w\-_.]', '_', wiki_result.title)[:50]
+        report_filename = f"PRD_Review_{safe_title}_{review_date.replace(':', '-')}.md"
+        report_path = reports_dir / report_filename
+        
+        # 生成报告内容
+        report_content = f"""---
+reviewType: PRD_REVIEW
+wikiUrl: {input_data.wikiUrl}
+reviewerName: {input_data.reviewerName}
+reviewDate: {review_date}
+overallScore: {total_score}
+overallStatus: {status}
+---
+
+# PRD需求评审报告
+
+## 基本信息
+- **文档标题**: {wiki_result.title}
+- **Wiki链接**: {input_data.wikiUrl}
+- **评审人**: {input_data.reviewerName}
+- **评审时间**: {review_date}
+
+## 评审结果
+- **总体评分**: {total_score}/100
+- **评审状态**: {status}
+
+## 详细评审标准
+
+"""
+        
+        for i, criterion in enumerate(criteria, 1):
+            status_icon = "✅" if criterion.passed else "❌"
+            report_content += f"""### {i}. {criterion.name} {status_icon}
+
+**标准描述**: {criterion.description}
+
+**评分**: {criterion.score}/100
+
+**评审意见**:
+"""
+            for comment in criterion.comments:
+                report_content += f"- {comment}\n"
+            
+            if criterion.suggestions:
+                report_content += f"\n**改进建议**:\n"
+                for suggestion in criterion.suggestions:
+                    report_content += f"- {suggestion}\n"
+            
+            report_content += "\n"
+        
+        report_content += f"""## 评审总结
+
+{summary}
+
+## 后续行动项
+
+"""
+        for i, step in enumerate(next_steps, 1):
+            report_content += f"{i}. {step}\n"
+        
+        report_content += f"""
+## 附录
+
+### PRD文档摘要
+- **文档长度**: {len(wiki_result.content)} 字符
+- **最后修改**: {wiki_result.lastModified}
+- **作者**: {wiki_result.author}
+- **附件数量**: {len(wiki_result.attachments)}
+
+---
+*本报告由DevFlow MCP自动生成*
+"""
+        
+        # 写入报告文件
+        report_path.write_text(report_content, encoding="utf-8")
+        
+        return str(report_path)
+        
+    except Exception as e:
+        return f"报告生成失败: {str(e)}"
+
 
 if __name__ == "__main__":
     # 以 stdio 方式启动 MCP（FastMCP 会处理协议细节）

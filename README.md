@@ -126,7 +126,7 @@ DevFlow MCP
 
 - jira.mark_progress（RPC：mcp_jira_mark_progress）: 智能标记任务进展到 Jira，自动生成包含任务状态、Git改动、文档状态和下一步计划的结构化评论
 
-- mysql.execute_statements（RPC：mcp_mysql_execute_statements）: 内置 MySQL 执行器（需配置 MYSQL_HOST/USER/PASSWORD/DB 等环境变量）
+- mysql.execute_statements（RPC：mcp_mysql_execute_statements）: 内置 MySQL 执行器（优先读取 `projectRoot/.env`，未命中时回退到 `MYSQL_HOST/USER/PASSWORD/DB` 等进程环境变量）
 
 ### Wiki (Confluence) 集成工具
 

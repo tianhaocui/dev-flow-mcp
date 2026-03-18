@@ -1115,7 +1115,8 @@ def verify_plan_with_mysql_mcp(input: MySQLPlanInput) -> MySQLPlanOutput:
             mysql_result = mysql_execute_statements(MySQLExecuteInput(
                 taskKey=input.taskKey,
                 statements=all_statements,
-                continueOnError=True
+                continueOnError=True,
+                projectRoot=input.projectRoot
             ))
             execution_results = mysql_result.results
             executed = True
@@ -1722,6 +1723,7 @@ class MySQLExecuteInput(BaseModel):
     taskKey: Optional[str] = Field(None, description="任务唯一标识（可选，用于审计）")
     statements: List[str] = Field(..., description="要顺序执行的 SQL 列表")
     continueOnError: bool = Field(False, description="遇到错误是否继续执行后续语句")
+    projectRoot: Optional[str] = Field(None, description="项目根目录；优先读取该目录下的 .env 作为 MySQL 配置来源")
 
 
 class MySQLExecuteOutput(BaseModel):
@@ -1729,31 +1731,81 @@ class MySQLExecuteOutput(BaseModel):
     hint: str
 
 
-def _get_mysql_connection():
-    host = os.getenv("MYSQL_HOST")
-    user = os.getenv("MYSQL_USER")
-    password = os.getenv("MYSQL_PASSWORD")
-    database = os.getenv("MYSQL_DB")
-    port = int(os.getenv("MYSQL_PORT", "3306"))
-    charset = os.getenv("MYSQL_CHARSET", "utf8mb4")
+def _parse_simple_dotenv(dotenv_path: Path) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    if not dotenv_path.exists():
+        return values
+
+    for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if value and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key] = value
+
+    return values
+
+
+def _load_mysql_config(project_root: Optional[Path]) -> Dict[str, str]:
+    env_values: Dict[str, str] = {}
+    if project_root:
+        env_values = _parse_simple_dotenv(project_root / ".env")
+
+    def pick(name: str, default: Optional[str] = None) -> Optional[str]:
+        dotenv_value = env_values.get(name)
+        if dotenv_value not in (None, ""):
+            return dotenv_value
+        system_value = os.getenv(name)
+        if system_value not in (None, ""):
+            return system_value
+        return default
+
+    return {
+        "MYSQL_HOST": pick("MYSQL_HOST"),
+        "MYSQL_USER": pick("MYSQL_USER"),
+        "MYSQL_PASSWORD": pick("MYSQL_PASSWORD"),
+        "MYSQL_DB": pick("MYSQL_DB"),
+        "MYSQL_PORT": pick("MYSQL_PORT", "3306"),
+        "MYSQL_CHARSET": pick("MYSQL_CHARSET", "utf8mb4"),
+    }
+
+
+def _get_mysql_connection(project_root: Optional[Path] = None):
+    config = _load_mysql_config(project_root)
+    host = config["MYSQL_HOST"]
+    user = config["MYSQL_USER"]
+    password = config["MYSQL_PASSWORD"]
+    database = config["MYSQL_DB"]
+    port = int(config["MYSQL_PORT"] or "3306")
+    charset = config["MYSQL_CHARSET"] or "utf8mb4"
     if not all([host, user, password, database]):
         missing = [n for n, v in [("MYSQL_HOST", host), ("MYSQL_USER", user), ("MYSQL_PASSWORD", password), ("MYSQL_DB", database)] if not v]
-        raise ValueError(f"Missing MySQL env vars: {', '.join(missing)}")
+        source_hint = f"{project_root / '.env'} and process env" if project_root else "process env"
+        raise ValueError(f"Missing MySQL config in {source_hint}: {', '.join(missing)}")
     return pymysql.connect(host=host, port=port, user=user, password=password, database=database, charset=charset, cursorclass=pymysql.cursors.DictCursor, autocommit=True)
 
 
 @app.tool()
 def mysql_execute_statements(input: MySQLExecuteInput) -> MySQLExecuteOutput:
     """执行一组 SQL 语句。
-    需要环境变量：MYSQL_HOST, MYSQL_PORT(可选), MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB, MYSQL_CHARSET(可选)
+    优先读取项目根目录 .env（若传入 projectRoot 或可解析到当前项目根目录），
+    若未命中则回退到进程环境变量：
+    MYSQL_HOST, MYSQL_PORT(可选), MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB, MYSQL_CHARSET(可选)
     """
     results: List[MySQLStatementResult] = []
+    project_root = _resolve_project_root(input.projectRoot)
     try:
-        connection = _get_mysql_connection()
+        connection = _get_mysql_connection(project_root)
     except Exception as exc:  # pragma: no cover
         for sql in input.statements:
             results.append(MySQLStatementResult(sql=sql, success=False, error=f"ConnectionError: {exc}"))
-        return MySQLExecuteOutput(results=results, hint="Ensure MySQL env vars are set and reachable")
+        return MySQLExecuteOutput(results=results, hint=f"Ensure MySQL config exists in {project_root / '.env'} or process env, and the database is reachable")
 
     try:
         with connection.cursor() as cursor:
